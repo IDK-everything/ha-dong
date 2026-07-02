@@ -13,6 +13,7 @@ from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
 
+from bs4 import BeautifulSoup as BS
 from .dh_lottery_client import DhLotteryClient, DhLotteryError
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ class DhPension720BuyData:
     order_no: str
     issue_dt: str
     games: List[DhPension720Game] = field(default_factory=list)
+    failed_candidates: List[str] = field(default_factory=list)
+    success_candidate: Optional[str] = None
 
     def to_dict(self) -> Dict:
         """데이터를 사전 형식으로 변환합니다."""
@@ -47,6 +50,8 @@ class DhPension720BuyData:
             "order_no": self.order_no,
             "issue_dt": self.issue_dt,
             "games": [game.__dict__ for game in self.games],
+            "failed_candidates": self.failed_candidates,
+            "success_candidate": self.success_candidate,
         }
 
 
@@ -156,13 +161,12 @@ class DhPension720:
     async def async_get_latest_round_no(self) -> int:
         """최신 연금복권 회차 번호를 가져옵니다."""
         try:
-            from bs4 import BeautifulSoup as BS
             resp = await self.client.session.get(
                 "https://www.dhlottery.co.kr/common.do?method=main",
                 headers=self._REQ_HEADERS
             )
             html = await resp.text()
-            soup = BS(html, "html5lib")
+            soup = BS(html, "html.parser")
             found = soup.find("strong", id="drwNo720")
             if found:
                 return int(found.text)

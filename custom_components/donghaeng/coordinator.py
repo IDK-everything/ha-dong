@@ -288,6 +288,8 @@ class DhPension720Coordinator(DhCoordinator):
         self.lottery_refresh_func = lottery_refresh_func
         self._latest_round_no: Optional[int] = None
         self._buy_history_last_updated: Optional[datetime.datetime] = None
+        self._last_pension_buy_attempt_time: Optional[datetime.datetime] = None
+        self._last_pension_buy_attempt_round: Optional[int] = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """연금복권 720+ 데이터를 비동기로 업데이트합니다."""
@@ -340,6 +342,13 @@ class DhPension720Coordinator(DhCoordinator):
                 target_round = self._latest_round_no + 1
                 already_bought = any(history.round_no == target_round for history in buy_history_this_week)
                 
+                # Cooldown check: Do not retry if we attempted in the last 30 minutes for this target round
+                cooldown_active = (
+                    self._last_pension_buy_attempt_round == target_round
+                    and self._last_pension_buy_attempt_time is not None
+                    and (now - self._last_pension_buy_attempt_time) < datetime.timedelta(minutes=30)
+                )
+
                 # 새벽 0시~6시 등 판매정지 시간이 아닐 때만 구매
                 is_valid_sales_time = True
                 if now.weekday() == 3 and 17 <= now.hour < 20: # 목요일 17~20시 판매 정지
@@ -347,8 +356,10 @@ class DhPension720Coordinator(DhCoordinator):
                 if 0 <= now.hour < 6: # 매일 0~6시 판매 정지
                     is_valid_sales_time = False
 
-                if not already_bought and is_valid_sales_time:
+                if not already_bought and is_valid_sales_time and not cooldown_active:
                     _LOGGER.info(f"설정된 자동 구매 시간 도달. 연금복권 {target_round}회 자동 구매를 진행합니다.")
+                    self._last_pension_buy_attempt_round = target_round
+                    self._last_pension_buy_attempt_time = now
                     try:
                         result = await self.pension_720.async_buy()
                         await self.lottery_refresh_func()
