@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Any
 
 import aiohttp
 import yarl
+import urllib.parse
 from Crypto.Cipher import AES
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Hash import SHA256
@@ -203,7 +204,7 @@ class DhPension720:
             resp = await self.client.session.post(
                 url="https://el.dhlottery.co.kr/makeOrderNo.do",
                 headers=headers,
-                data={"q": enc_order_payload}
+                data={"q": urllib.parse.quote(enc_order_payload, safe='')}
             )
             resp_text = await resp.text()
             order_ret = json.loads(resp_text)
@@ -283,7 +284,7 @@ class DhPension720:
                 resp = await self.client.session.post(
                     url="https://el.dhlottery.co.kr/makeAutoNo.do",
                     headers=headers,
-                    data={"q": enc_payload}
+                    data={"q": urllib.parse.quote(enc_payload, safe='')}
                 )
                 resp_text = await resp.text()
                 make_auto_ret = json.loads(resp_text)
@@ -336,7 +337,7 @@ class DhPension720:
             resp = await self.client.session.post(
                 url="https://el.dhlottery.co.kr/connPro.do",
                 headers=headers,
-                data={"q": enc_conn_payload}
+                data={"q": urllib.parse.quote(enc_conn_payload, safe='')}
             )
             resp_text = await resp.text()
             conn_ret = json.loads(resp_text)
