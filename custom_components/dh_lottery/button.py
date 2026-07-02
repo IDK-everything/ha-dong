@@ -4,14 +4,17 @@ from homeassistant.components.button import ButtonEntity, ButtonDeviceClass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from . import DhLotteryData, DhLotteryConfigEntry, CONF_LOTTO_645, DOMAIN
+from . import DhLotteryConfigEntry, DhLotteryData, CONF_LOTTO_645, CONF_PENSION_720, DOMAIN
 from .client.dh_lottery_client import DhLotteryClient
 from .client.dh_lotto_645 import DhLotto645Error
+from .client.dh_pension_720 import DhPension720Error
 from .const import (
     BRAND_NAME,
     get_dh_lottery_device_info,
     get_dh_lotto_645_device_info,
+    get_dh_pension_720_device_info,
     BUY_LOTTO_645_SERVICE_NAME,
+    BUY_PENSION_720_SERVICE_NAME,
     REFRESH_LOTTERY_SERVICE_NAME,
 )
 
@@ -29,6 +32,8 @@ async def async_setup_entry(
     if entry.data[CONF_LOTTO_645]:
         entities.append(DHLotto645Buy1Button(hass, data.lotto_645_coord.client))
         entities.append(DHLotto645BuyAllButton(hass, data.lotto_645_coord.client))
+    if entry.data.get(CONF_PENSION_720, False):
+        entities.append(DHPension720BuyButton(hass, data.pension_720_coord.client))
     async_add_entities(entities)
 
 
@@ -122,3 +127,31 @@ class DHLotto645BuyAllButton(DhButton):
         )
         if result["result"] == "fail":
             raise DhLotto645Error(result["message"])
+
+
+class DHPension720BuyButton(DhButton):
+    """연금복권 720 1세트(5장) 자동 구매 버튼 엔티티."""
+
+    _attr_device_class = ButtonDeviceClass.IDENTIFY
+    _attr_name = "연금복권 1세트 자동 구매"
+    _attr_icon = "mdi:numeric-5-box"
+
+    def __init__(self, hass: HomeAssistant, client: DhLotteryClient):
+        super().__init__(client, "pension_720_buy")
+        self.hass = hass
+        self._attr_device_info = get_dh_pension_720_device_info(client.username)
+
+    async def async_press(self) -> None:
+        """버튼을 누릅니다."""
+        result = await self.hass.services.async_call(
+            DOMAIN,
+            BUY_PENSION_720_SERVICE_NAME,
+            {
+                "entity_id": self.entity_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        if result["result"] == "fail":
+            raise DhPension720Error(result["message"])
+

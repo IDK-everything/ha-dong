@@ -24,10 +24,12 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     CONF_LOTTO_645,
+    CONF_PENSION_720,
     BUY_LOTTO_645_SERVICE_NAME,
+    BUY_PENSION_720_SERVICE_NAME,
     REFRESH_LOTTERY_SERVICE_NAME,
 )
-from .coordinator import DhLotto645Coordinator, DhLotteryCoordinator
+from .coordinator import DhLotto645Coordinator, DhLotteryCoordinator, DhPension720Coordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +42,7 @@ class DhLotteryData:
 
     lottery_coord: DhLotteryCoordinator = None
     lotto_645_coord: Optional[DhLotto645Coordinator] = None
+    pension_720_coord: Optional[DhPension720Coordinator] = None
 
 
 BUY_LOTTO_645_SCHEMA = vol.Schema(
@@ -50,6 +53,13 @@ BUY_LOTTO_645_SCHEMA = vol.Schema(
         vol.Optional("game_3"): cv.string,
         vol.Optional("game_4"): cv.string,
         vol.Optional("game_5"): cv.string,
+    }
+)
+
+
+BUY_PENSION_720_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_id,
     }
 )
 
@@ -82,6 +92,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
         except Exception as ex:
             raise ConfigEntryNotReady(f"로또 정보 조회 실패: {ex}") from ex
 
+    if entry.data.get(CONF_PENSION_720, False):
+        data.pension_720_coord = DhPension720Coordinator(
+            hass, client, entry, data.lottery_coord.async_clear_refresh
+        )
+        try:
+            await data.pension_720_coord.async_config_entry_first_refresh()
+        except Exception as ex:
+            raise ConfigEntryNotReady(f"연금복권 정보 조회 실패: {ex}") from ex
+
     entry.runtime_data = data
     hass.data[DOMAIN][entry.entry_id] = data
 
@@ -113,6 +132,8 @@ async def _async_setup_service(
             await lottery_data.lottery_coord.async_clear_refresh()
             if lottery_data.lotto_645_coord:
                 await lottery_data.lotto_645_coord.async_clear_refresh()
+            if lottery_data.pension_720_coord:
+                await lottery_data.pension_720_coord.async_clear_refresh()
 
     def _find_lottery_data(deposit_id: str) -> DhLotteryData:
         registry = er.async_get(hass)
@@ -165,7 +186,44 @@ async def _async_setup_service(
         finally:
             if lottery_data:
                 await lottery_data.lottery_coord.async_clear_refresh()
-                await lottery_data.lotto_645_coord.async_clear_refresh()
+                if lottery_data.lotto_645_coord:
+                    await lottery_data.lotto_645_coord.async_clear_refresh()
+
+    async def _async_buy_pension_720(call: ServiceCall) -> ServiceResponse:
+        """연금복권 720+를 구매합니다."""
+        lottery_data: DhLotteryData | None = None
+        try:
+            lottery_data = _find_lottery_data(call.data["entity_id"])
+            if not lottery_data.pension_720_coord:
+                raise ValueError("연금복권 코디네이터가 활성화되어 있지 않습니다.")
+            result = await lottery_data.pension_720_coord.pension_720.async_buy()
+            number_text = "\n".join(
+                [
+                     f"- {game.group} {game.numbers} ({game.status})"
+                     for game in result.games
+                ]
+            )
+            message = f"제 {result.round_no}회\n발행일: {result.issue_dt}\n주문번호: {result.order_no}\n번호:\n{number_text}"
+            persistent_notification.async_create(
+                hass, message, "연금복권 720+ 구매", call.context.id
+            )
+            return {
+                "result": "success",
+                "value": result.to_dict(),
+            }
+        except Exception as e:
+            persistent_notification.async_create(
+                hass, str(e), "연금복권 720+ 구매 실패", call.context.id
+            )
+            return {
+                "result": "fail",
+                "message": str(e),
+            }
+        finally:
+            if lottery_data:
+                await lottery_data.lottery_coord.async_clear_refresh()
+                if lottery_data.pension_720_coord:
+                    await lottery_data.pension_720_coord.async_clear_refresh()
 
     hass.services.async_register(
         DOMAIN,
@@ -178,5 +236,13 @@ async def _async_setup_service(
             BUY_LOTTO_645_SERVICE_NAME,
             _async_buy_lotto_645,
             schema=BUY_LOTTO_645_SCHEMA,
+            supports_response=SupportsResponse.ONLY,
+        )
+    if entry.data.get(CONF_PENSION_720, False):
+        hass.services.async_register(
+            DOMAIN,
+            BUY_PENSION_720_SERVICE_NAME,
+            _async_buy_pension_720,
+            schema=BUY_PENSION_720_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )

@@ -14,13 +14,16 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DhLotteryConfigEntry, DhLotteryData
 from .const import (
     CONF_LOTTO_645,
+    CONF_PENSION_720,
     BRAND_NAME,
     get_dh_lotto_645_device_info,
     get_dh_lottery_device_info,
+    get_dh_pension_720_device_info,
 )
 from .coordinator import (
     DhLotto645Coordinator,
     DhLotteryCoordinator,
+    DhPension720Coordinator,
     DhCoordinator,
     DhLotto645BuyData,
 )
@@ -45,6 +48,10 @@ async def async_setup_entry(
         entities.append(DhLotto645WinningSensor(data.lotto_645_coord))
         for i in range(1, 6):
             entities.append(DhLotto645HistorySensor(data.lotto_645_coord, i))
+    if entry.data.get(CONF_PENSION_720, False):
+        entities.append(DhPension720WinningSensor(data.pension_720_coord))
+        for i in range(1, 6):
+            entities.append(DhPension720HistorySensor(data.pension_720_coord, i))
     async_add_entities(entities)
 
 
@@ -255,3 +262,101 @@ class DhAccumulatedPrizeSensor(DhSensor, SensorEntity):
                 "업데이트": self.coordinator.data["update_dt"]
             }
             self.async_write_ha_state()
+
+
+class DhPension720WinningSensor(DhSensor, Entity):
+    """
+    동행복권 연금복권 최근 당첨결과 센서 클래스입니다.
+    """
+
+    _attr_icon = "mdi:star-circle-outline"
+
+    def __init__(self, coordinator: DhPension720Coordinator):
+        super().__init__(coordinator, "pension_720_win_round")
+        self._attr_name = "연금복권 최근 회차"
+        self._attr_device_info = get_dh_pension_720_device_info(
+            coordinator.client.username
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """최근 회차 정보를 업데이트합니다."""
+        if (result := self.coordinator.data["latest_round_no"]) is None:
+            return
+
+        try:
+            state = f"{result}회"
+            if self._attr_state == state:
+                return
+
+            self._attr_name = f"연금복권 최근 회차"
+            self._attr_state = state
+            self._attr_extra_state_attributes = {
+                "추첨 회차": result,
+            }
+        finally:
+            self._attr_extra_state_attributes["업데이트"] = self.coordinator.data[
+                "update_dt"
+            ]
+            self.async_write_ha_state()
+
+
+class DhPension720HistorySensor(DhSensor, Entity):
+    """
+    동행복권 연금복권 구매내역 센서 클래스입니다.
+    """
+
+    def __init__(self, coordinator: DhPension720Coordinator, no: int):
+        super().__init__(coordinator, f"pension_720_history_{no}")
+        self._no = no
+        self._attr_name = f"연금복권 게임 {no}"
+        self._attr_icon = "mdi:question-box-outline"
+        self._attr_device_info = get_dh_pension_720_device_info(
+            coordinator.client.username
+        )
+        self.result = None
+        self._attr_extra_state_attributes = {}
+
+    @property
+    def icon(self):
+        """프론트엔드에서 사용할 아이콘입니다."""
+        if not self.result:
+            return "mdi:close-box-outline"
+        if "미추첨" in self.result.status:
+            return "mdi:help-box-outline"
+        if "당첨" in self.result.status:
+            return "mdi:trophy-outline"
+        return "mdi:close-box"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """구입 내역 정보를 업데이트합니다."""
+        buy_history_this_week = self.coordinator.data["buy_history_this_week"]
+        try:
+            if not buy_history_this_week:
+                return
+
+            latest_set = buy_history_this_week[0]
+            if len(latest_set.games) < self._no:
+                return
+
+            result = latest_set.games[self._no - 1]
+            if self.result == result:
+                return
+            self.result = result
+            self._attr_name = f"연금복권 {latest_set.round_no}회 {result.group}"
+            self._attr_state = result.numbers
+            self._attr_extra_state_attributes = {
+                "추첨 회차": latest_set.round_no,
+                "주문번호": latest_set.order_no,
+                "조": result.group,
+                "번호": result.numbers,
+                "상태": result.status,
+                "순위": result.rank if result.rank > 0 else "낙첨/미추첨",
+            }
+        finally:
+            self._attr_extra_state_attributes["업데이트"] = self.coordinator.data[
+                "update_dt"
+            ]
+            self.async_write_ha_state()
+

@@ -7,7 +7,7 @@
   "documentation": "https://github.com/stkang/ha-component-dh-lottery",
   "homekit": {},
   "iot_class": "cloud_polling",
-  "requirements": [],
+  "requirements": ["pycryptodome"],
   "ssdp": [],
   "zeroconf": [],
   "version": "0.1.9",

@@ -5,7 +5,11 @@
       "user": {
         "data": {
           "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "password": "[%key:common::config_flow::data::password%]",
+          "lotto_645": "Lotto 6/45",
+          "pension_720": "Pension Lottery 720+",
+          "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
+          "pension_buy_weekday": "Pension Lottery Auto Buy Weekday"
         }
       }
     },

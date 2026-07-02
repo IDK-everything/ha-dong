@@ -14,7 +14,10 @@
         "data": {
           "username": "아이디",
           "password": "비밀번호",
-          "lotto_645": "로또 6/45"
+          "lotto_645": "로또 6/45",
+          "pension_720": "연금복권 720+",
+          "pension_buy_time": "연금복권 자동 구매 시간 (예: 17:00)",
+          "pension_buy_weekday": "연금복권 자동 구매 요일"
         }
       }
     }
@@ -51,6 +54,16 @@
         "game_5": {
           "name": "게임 5 (game_5)",
           "description": "예) 자동"
+        }
+      }
+    },
+    "buy_pension_720": {
+      "name": "연금복권 720+ 구매",
+      "description": "연금복권 720+를 1세트(5장) 자동 구매합니다.",
+      "fields": {
+        "entity_id": {
+          "name": "예치금 선택",
+          "description": "구매할 계정의 예치금 엔티티를 선택해주세요."
         }
       }
     }
