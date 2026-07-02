@@ -192,7 +192,7 @@ class DhLotteryClient:
 
         return DhLotteryBalanceData(
             deposit=total_amt,
-            purchase_available=crnt_entrs_amt,
+            purchase_available=max(0, total_amt - purchase_impossible),
             reservation_purchase=rsvt_ordr_amt,
             withdrawal_request=daw_aply_amt,
             purchase_impossible=purchase_impossible,
