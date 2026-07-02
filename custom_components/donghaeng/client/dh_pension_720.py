@@ -238,7 +238,7 @@ class DhPension720:
 
         latest_round = await self.async_get_latest_round_no()
         target_round = latest_round + 1
-        win720_round = str(latest_round)
+        win720_round = str(target_round)
 
         headers = self.client.session.headers.copy()
         headers.update(self._REQ_HEADERS)
