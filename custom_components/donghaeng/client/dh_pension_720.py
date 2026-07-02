@@ -91,15 +91,15 @@ class DhPension720:
         self.client = client
 
     async def _async_ensure_el_session(self) -> str:
-        """el.dhlottery.co.kr 세션을 확인하고 JSESSIONID를 반환합니다."""
-        # 1. www.dhlottery.co.kr의 JSESSIONID를 먼저 조회합니다.
-        www_cookies = self.client.session.cookie_jar.filter_cookies("https://www.dhlottery.co.kr")
-        www_jsessionid = www_cookies.get("JSESSIONID")
+        """el.dhlottery.co.kr 세션을 확인하고 JSESSIONID/DHJSESSIONID를 반환합니다."""
+        # 1. www.dhlottery.co.kr의 DHJSESSIONID 또는 JSESSIONID를 먼저 조회합니다.
+        www_cookies = self.client.session.cookie_jar.filter_cookies(yarl.URL("https://www.dhlottery.co.kr"))
+        www_jsessionid = www_cookies.get("DHJSESSIONID") or www_cookies.get("JSESSIONID")
 
         # 2. 만약 필터로 직접 조회가 안 된다면 전체 쿠키에서 탐색합니다.
         if not www_jsessionid:
             for cookie in self.client.session.cookie_jar:
-                if cookie.key.upper() == "JSESSIONID":
+                if cookie.key.upper() in ("DHJSESSIONID", "JSESSIONID"):
                     www_jsessionid = cookie
                     break
 
@@ -109,25 +109,26 @@ class DhPension720:
             try:
                 await self.client.async_login()
                 # 로그인 성공 후 다시 쿠키를 읽어옵니다.
-                www_cookies = self.client.session.cookie_jar.filter_cookies("https://www.dhlottery.co.kr")
-                www_jsessionid = www_cookies.get("JSESSIONID")
+                www_cookies = self.client.session.cookie_jar.filter_cookies(yarl.URL("https://www.dhlottery.co.kr"))
+                www_jsessionid = www_cookies.get("DHJSESSIONID") or www_cookies.get("JSESSIONID")
                 if not www_jsessionid:
                     for cookie in self.client.session.cookie_jar:
-                        if cookie.key.upper() == "JSESSIONID":
+                        if cookie.key.upper() in ("DHJSESSIONID", "JSESSIONID"):
                             www_jsessionid = cookie
                             break
             except Exception as ex:
                 raise DhPension720Error(f"❗재로그인 수행 실패: {ex}")
 
         if not www_jsessionid:
-            raise DhPension720Error("❗로그인 세션(JSESSIONID)을 획득할 수 없습니다. 다시 로그인해 주세요.")
+            raise DhPension720Error("❗로그인 세션(JSESSIONID/DHJSESSIONID)을 획득할 수 없습니다. 다시 로그인해 주세요.")
 
         www_jsessionid_value = www_jsessionid.value
+        www_jsessionid_key = www_jsessionid.key
 
         # 4. www.dhlottery.co.kr의 세션 쿠키를 el.dhlottery.co.kr 도메인에도 명시적으로 심어줍니다.
         # aiohttp의 엄격한 쿠키 분리 정책으로 인해 이 과정이 필수적입니다.
         self.client.session.cookie_jar.update_cookies(
-            {"JSESSIONID": www_jsessionid_value},
+            {www_jsessionid_key: www_jsessionid_value},
             response_url=yarl.URL("https://el.dhlottery.co.kr")
         )
 
@@ -144,8 +145,8 @@ class DhPension720:
             _LOGGER.warning(f"el.dhlottery.co.kr 세션 활성화 GET 요청 실패: {ex}")
 
         # 6. 최종적으로 el.dhlottery.co.kr 도메인용으로 할당된 세션 쿠키값을 반환합니다.
-        el_cookies = self.client.session.cookie_jar.filter_cookies("https://el.dhlottery.co.kr")
-        el_jsessionid = el_cookies.get("JSESSIONID")
+        el_cookies = self.client.session.cookie_jar.filter_cookies(yarl.URL("https://el.dhlottery.co.kr"))
+        el_jsessionid = el_cookies.get(www_jsessionid_key)
 
         if not el_jsessionid:
             return www_jsessionid_value
