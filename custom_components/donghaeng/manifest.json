@@ -1,5 +1,5 @@
 {
-  "domain": "dh_lottery",
+  "domain": "donghaeng",
   "name": "동행 복권",
   "codeowners": ["@stkang90"],
   "config_flow": true,

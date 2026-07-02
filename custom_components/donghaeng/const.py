@@ -5,7 +5,7 @@ from datetime import timedelta
 from homeassistant.const import Platform
 from homeassistant.helpers.device_registry import DeviceInfo
 
-DOMAIN = "dh_lottery"
+DOMAIN = "donghaeng"
 REFRESH_LOTTERY_SERVICE_NAME = "refresh_lottery"
 BUY_LOTTO_645_SERVICE_NAME = "buy_lotto_645"
 BUY_PENSION_720_SERVICE_NAME = "buy_pension_720"

@@ -5,7 +5,7 @@ buy_lotto_645:
       selector:
         entity:
           filter:
-            integration: dh_lottery
+            integration: donghaeng
           domain: sensor
     game_1:
       required: true
@@ -27,3 +27,13 @@ buy_lotto_645:
       required: false
       selector:
         text:
+
+buy_pension_720:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          filter:
+            integration: donghaeng
+          domain: sensor
