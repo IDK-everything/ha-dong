@@ -163,33 +163,28 @@ class DhPension720:
         """최신 연금복권 회차 번호를 가져옵니다."""
         try:
             resp = await self.client.session.get(
-                "https://www.dhlottery.co.kr/common.do?method=main",
+                "https://www.dhlottery.co.kr/selectMainInfo.do",
                 headers=self._REQ_HEADERS
             )
-            html = await resp.text()
-            soup = BS(html, "html.parser")
-            found = soup.find("strong", id="drwNo720")
-            if found:
-                return int(found.text)
+            data = await resp.json()
+            pt720_list = data.get("data", {}).get("result", {}).get("pt720", [])
+            if pt720_list:
+                return int(pt720_list[0]["psltEpsd"])
         except Exception as ex:
-            _LOGGER.warning(f"메인페이지에서 drwNo720 조회 실패: {ex}. 날짜 기준 자동 계산으로 대체합니다.")
+            _LOGGER.warning(f"selectMainInfo.do에서 연금복권 회차 조회 실패: {ex}. 날짜 기준 자동 계산으로 대체합니다.")
 
-        base_date = datetime.datetime(2024, 12, 26)
-        base_round = 244
-        
-        today = datetime.datetime.today().replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        days_ahead = (3 - today.weekday()) % 7
-        next_thursday = today + datetime.timedelta(days=days_ahead)
-        
-        weeks = (next_thursday - base_date).days // 7
+        # 날짜 기준 자동 계산 (실제 최신 추첨 회차 반환)
+        # 기준: 322회차 추첨일 - 2026년 7월 2일 목요일 19:00:00
+        base_date = datetime.datetime(2026, 7, 2, 19, 0, 0)
+        base_round = 322
         
         now = datetime.datetime.now()
-        current_thursday_draw = now.replace(hour=19, minute=5, second=0, microsecond=0)
+        delta_weeks = (now - base_date).days // 7
+        calculated_round = base_round + delta_weeks
         
-        calculated_round = base_round + weeks
-        if now.weekday() == 3 and now < current_thursday_draw:
-            return calculated_round - 1
+        # 목요일이고 당일 추첨 시간(19시 5분) 이전인 경우 지난주 회차 반환
+        if now.weekday() == 3 and now.time() < datetime.time(19, 5):
+            calculated_round -= 1
             
         return calculated_round
 
