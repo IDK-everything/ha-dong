@@ -189,10 +189,10 @@ class DhPension720:
         return calculated_round
 
     async def _async_do_order_request(
-        self, win720_round: str, num: str, key_code: str, headers: dict
+        self, win720_round: str, last_episode: str, num: str, key_code: str, headers: dict
     ) -> tuple[str, str]:
         """지정된 번호로 주문(예약)을 요청합니다."""
-        order_payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={win720_round}&AUTO_SEL_SET=SA&SEL_CLASS=&SEL_NO={num}&BUY_TYPE=M&BUY_CNT=5"
+        order_payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={last_episode}&AUTO_SEL_SET=SA&SEL_CLASS=&SEL_NO={num}&BUY_TYPE=M&BUY_CNT=5"
         enc_order_payload = self._encText(order_payload, key_code)
 
         try:
@@ -252,11 +252,13 @@ class DhPension720:
         failed_candidates = []
         success_candidate = None
 
+        last_episode = str(latest_round)
         for num in candidates:
             _LOGGER.info(f"연금복권 수동 후보 번호 {num} 예약 시도 중...")
             try:
                 orderNo, orderDate = await self._async_do_order_request(
                     win720_round=win720_round,
+                    last_episode=last_episode,
                     num=num,
                     key_code=keyCode,
                     headers=headers
@@ -272,7 +274,7 @@ class DhPension720:
 
         if not reserved_num:
             _LOGGER.info("모든 수동 후보 번호 예약에 실패하여 자동 번호로 구매를 진행합니다.")
-            payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={win720_round}&SEL_NO=&BUY_CNT=&AUTO_SEL_SET=SA&SEL_CLASS=&BUY_TYPE=A&ACCS_TYPE=01"
+            payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={last_episode}&AUTO_SEL_SET=SA&SEL_CLASS=&BUY_TYPE=A&ACCS_TYPE=01"
             enc_payload = self._encText(payload, keyCode)
             
             try:
@@ -307,6 +309,7 @@ class DhPension720:
             try:
                 orderNo, orderDate = await self._async_do_order_request(
                     win720_round=win720_round,
+                    last_episode=last_episode,
                     num=extracted_num,
                     key_code=keyCode,
                     headers=headers
@@ -346,6 +349,10 @@ class DhPension720:
         try:
             parsed_conn = json.loads(decrypted_conn)
         except Exception as ex:
+            # 서버에서 에러 응답 시 JSON이 깨지는 현상이 있으므로 regex로 에러 메시지를 추출합니다.
+            msg_match = re.search(r'"resultMessage"\s*:\s*"([^"]+)"', decrypted_conn)
+            if msg_match:
+                raise DhPension720Error(f"❗연금복권 결제 실패: {msg_match.group(1)}")
             raise DhPension720Error(f"결제 결과 복호화 실패: {decrypted_conn[:200]}...")
 
         result = parsed_conn.get("result", {})
