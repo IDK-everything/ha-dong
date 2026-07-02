@@ -131,9 +131,9 @@ class DhPension720:
         www_jsessionid_key = www_jsessionid.key
 
         # 4. www.dhlottery.co.kr의 세션 쿠키를 el.dhlottery.co.kr 도메인에도 명시적으로 심어줍니다.
-        # aiohttp의 엄격한 쿠키 분리 정책으로 인해 이 과정이 필수적입니다.
+        # el.dhlottery.co.kr 서버가 JSESSIONID 또는 DHJSESSIONID 중 어느 이름을 기대하더라도 로그인 상태가 연동되도록 둘 다 심어줍니다.
         self.client.session.cookie_jar.update_cookies(
-            {www_jsessionid_key: www_jsessionid_value},
+            {"JSESSIONID": www_jsessionid_value, "DHJSESSIONID": www_jsessionid_value},
             response_url=yarl.URL("https://el.dhlottery.co.kr")
         )
 
@@ -151,7 +151,7 @@ class DhPension720:
 
         # 6. 최종적으로 el.dhlottery.co.kr 도메인용으로 할당된 세션 쿠키값을 반환합니다.
         el_cookies = self.client.session.cookie_jar.filter_cookies(yarl.URL("https://el.dhlottery.co.kr"))
-        el_jsessionid = el_cookies.get(www_jsessionid_key)
+        el_jsessionid = el_cookies.get("JSESSIONID") or el_cookies.get("DHJSESSIONID")
 
         if not el_jsessionid:
             return www_jsessionid_value
