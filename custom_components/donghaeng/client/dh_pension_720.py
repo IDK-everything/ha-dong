@@ -346,20 +346,23 @@ class DhPension720:
             raise DhPension720Error(f"결제 진행(connPro) 중 오류가 발생했습니다: {ex}")
 
         decrypted_conn = self._decText(q_val, keyCode)
+        # 서버에서 응답 시 nested JSON(resultCode)의 따옴표가 이스케이프되지 않아 JSON이 깨지는 현상을 수정합니다.
+        fixed_conn = re.sub(r'"resultCode"\s*:\s*"(\{.*?\})"\s*(,|\})', r'"resultCode": \1\2', decrypted_conn)
         try:
-            parsed_conn = json.loads(decrypted_conn)
+            parsed_conn = json.loads(fixed_conn)
         except Exception as ex:
-            # 서버에서 에러 응답 시 JSON이 깨지는 현상이 있으므로 regex로 에러 메시지를 추출합니다.
-            msg_match = re.search(r'"resultMessage"\s*:\s*"([^"]+)"', decrypted_conn)
-            if msg_match:
-                raise DhPension720Error(f"❗연금복권 결제 실패: {msg_match.group(1)}")
             raise DhPension720Error(f"결제 결과 복호화 실패: {decrypted_conn[:200]}...")
 
-        result = parsed_conn.get("result", {})
-        result_msg = result.get("resultMsg", "FAILURE")
-        if result_msg.upper() != "SUCCESS":
-            error_msg = result.get("resultErrorMsg", "결제에 실패했습니다.")
-            raise DhPension720Error(f"❗연금복권 결제 실패: {error_msg}")
+        result_code_info = parsed_conn.get("resultCode", {})
+        if isinstance(result_code_info, dict):
+            inner_code = result_code_info.get("resultCode")
+            inner_msg = result_code_info.get("resultMessage", "결제 실패")
+        else:
+            inner_code = str(result_code_info)
+            inner_msg = parsed_conn.get("resultMessage") or parsed_conn.get("resultMsg") or "결제 실패"
+
+        if inner_code != "100":
+            raise DhPension720Error(f"❗연금복권 결제 실패: {inner_msg}")
 
         games = []
         is_manual = reserved_num in candidates
