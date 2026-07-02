@@ -1,6 +1,6 @@
 {
   "domain": "donghaeng",
-  "name": "동행 복권",
+  "name": "동행복권",
   "codeowners": ["@stkang90"],
   "config_flow": true,
   "dependencies": [],
