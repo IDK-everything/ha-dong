@@ -23,6 +23,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional("pension_buy_weekday", default="목요일"): vol.In(
             ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
         ),
+        vol.Optional("discord_webhook_url", default=""): cv.string,
     }
 )
 

@@ -43,6 +43,7 @@ class DhLotteryData:
     lottery_coord: DhLotteryCoordinator = None
     lotto_645_coord: Optional[DhLotto645Coordinator] = None
     pension_720_coord: Optional[DhPension720Coordinator] = None
+    entry: Optional[ConfigEntry] = None
 
 
 BUY_LOTTO_645_SCHEMA = vol.Schema(
@@ -75,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
     except DhLotteryError as ex:
         raise ConfigEntryNotReady(f"동행 복권 로그인 실패: {ex}") from ex
 
-    data = DhLotteryData(DhLotteryCoordinator(hass, client))
+    data = DhLotteryData(DhLotteryCoordinator(hass, client), entry=entry)
 
     # 센서 플랫폼 설정 전에 coordinator 첫 새로고침 수행
     try:
@@ -171,6 +172,19 @@ async def _async_setup_service(
             persistent_notification.async_create(
                 hass, message, "로또 6/45 구매", call.context.id
             )
+            
+            # Discord Webhook Notification
+            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            if webhook_url:
+                discord_msg = (
+                    f"📢 **동행복권 로또 6/45 구매 완료**\n"
+                    f"- **회차**: 제 {result.round_no}회\n"
+                    f"- **발행일**: {result.issue_dt}\n"
+                    f"- **바코드**: {result.barcode}\n"
+                    f"- **구매 번호**:\n{number_text}"
+                )
+                hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
+
             return {
                 "result": "success",
                 "value": result.to_dict(),
@@ -179,6 +193,13 @@ async def _async_setup_service(
             persistent_notification.async_create(
                 hass, str(e), "로또 6/45 구매 실패", call.context.id
             )
+            
+            # Discord Webhook Notification
+            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            if webhook_url:
+                discord_msg = f"❌ **동행복권 로또 6/45 구매 실패**\n- **사유**: {str(e)}"
+                hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
+
             return {
                 "result": "fail",
                 "message": str(e),
@@ -207,6 +228,24 @@ async def _async_setup_service(
             persistent_notification.async_create(
                 hass, message, "연금복권 720+ 구매", call.context.id
             )
+            
+            # Discord Webhook Notification
+            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            if webhook_url:
+                failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
+                success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
+                
+                discord_msg = (
+                    f"📢 **동행복권 연금복권 720+ 구매 완료**\n"
+                    f"- **회차**: 제 {result.round_no}회\n"
+                    f"- **발행일**: {result.issue_dt}\n"
+                    f"- **주문번호**: {result.order_no}\n"
+                    f"- **성공 번호 (수동 후보)**: {success_candidate_str}\n"
+                    f"- **실패 번호 (수동 후보)**: {failed_candidates_str}\n"
+                    f"- **구매 번호**:\n{number_text}"
+                )
+                hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
+
             return {
                 "result": "success",
                 "value": result.to_dict(),
@@ -215,6 +254,13 @@ async def _async_setup_service(
             persistent_notification.async_create(
                 hass, str(e), "연금복권 720+ 구매 실패", call.context.id
             )
+            
+            # Discord Webhook Notification
+            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            if webhook_url:
+                discord_msg = f"❌ **동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(e)}"
+                hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
+
             return {
                 "result": "fail",
                 "message": str(e),

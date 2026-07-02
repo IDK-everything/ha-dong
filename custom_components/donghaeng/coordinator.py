@@ -350,11 +350,40 @@ class DhPension720Coordinator(DhCoordinator):
                 if not already_bought and is_valid_sales_time:
                     _LOGGER.info(f"설정된 자동 구매 시간 도달. 연금복권 {target_round}회 자동 구매를 진행합니다.")
                     try:
-                        await self.pension_720.async_buy()
+                        result = await self.pension_720.async_buy()
                         await self.lottery_refresh_func()
                         buy_history_this_week = await self.pension_720.async_get_buy_history_this_week()
+                        
+                        # Discord Webhook Notification
+                        webhook_url = self.entry.data.get("discord_webhook_url") if self.entry else None
+                        if webhook_url:
+                            number_text = "\n".join(
+                                [
+                                     f"- {game.group} {game.numbers} ({game.status})"
+                                     for game in result.games
+                                ]
+                            )
+                            failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
+                            success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
+                            
+                            discord_msg = (
+                                f"📢 **[자동] 동행복권 연금복권 720+ 구매 완료**\n"
+                                f"- **회차**: 제 {result.round_no}회\n"
+                                f"- **발행일**: {result.issue_dt}\n"
+                                f"- **주문번호**: {result.order_no}\n"
+                                f"- **성공 번호 (수동 후보)**: {success_candidate_str}\n"
+                                f"- **실패 번호 (수동 후보)**: {failed_candidates_str}\n"
+                                f"- **구매 번호**:\n{number_text}"
+                            )
+                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
                     except Exception as ex:
                         _LOGGER.error(f"백그라운드 연금복권 자동 구매 중 오류 발생: {ex}")
+                        
+                        # Discord Webhook Notification
+                        webhook_url = self.entry.data.get("discord_webhook_url") if self.entry else None
+                        if webhook_url:
+                            discord_msg = f"❌ **[자동] 동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(ex)}"
+                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
 
             return {
                 "latest_round_no": self._latest_round_no,

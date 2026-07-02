@@ -249,6 +249,8 @@ class DhPension720:
         reserved_num = None
         orderNo = None
         orderDate = None
+        failed_candidates = []
+        success_candidate = None
 
         for num in candidates:
             _LOGGER.info(f"연금복권 수동 후보 번호 {num} 예약 시도 중...")
@@ -260,9 +262,11 @@ class DhPension720:
                     headers=headers
                 )
                 reserved_num = num
+                success_candidate = num
                 _LOGGER.info(f"수동 후보 번호 {num} 예약 성공! (주문번호: {orderNo})")
                 break
             except Exception as ex:
+                failed_candidates.append(num)
                 _LOGGER.warning(f"수동 후보 번호 {num} 예약 실패 (다음 후보 시도): {ex}")
                 continue
 
@@ -367,7 +371,9 @@ class DhPension720:
             round_no=target_round,
             order_no=orderNo,
             issue_dt=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            games=games
+            games=games,
+            failed_candidates=failed_candidates,
+            success_candidate=success_candidate
         )
 
         _LOGGER.info(f"연금복권 {target_round}회 1세트 구매 완료 (수동여부: {is_manual}, 주문번호: {orderNo})")

@@ -9,7 +9,8 @@
           "lotto_645": "Lotto 6/45",
           "pension_720": "Pension Lottery 720+",
           "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
-          "pension_buy_weekday": "Pension Lottery Auto Buy Weekday"
+          "pension_buy_weekday": "Pension Lottery Auto Buy Weekday",
+          "discord_webhook_url": "Discord Webhook URL"
         }
       }
     },
