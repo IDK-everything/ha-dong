@@ -10,7 +10,7 @@ REFRESH_LOTTERY_SERVICE_NAME = "refresh_lottery"
 BUY_LOTTO_645_SERVICE_NAME = "buy_lotto_645"
 BUY_PENSION_720_SERVICE_NAME = "buy_pension_720"
 
-TITLE = "동행복권"
+TITLE = "로또연금"
 TITLE_LOTTO = "로또 6/45"
 TITLE_PENSION = "연금복권 720+"
 DH_LOTTERY = "DH Lottery"
