@@ -29,10 +29,10 @@ async def async_setup_entry(
 
     refresh_button = DhLotteryRefreshButton(data.lottery_coord.client)
     entities: List[Entity] = [refresh_button]
-    if entry.data[CONF_LOTTO_645]:
+    if entry.options.get(CONF_LOTTO_645, entry.data[CONF_LOTTO_645]):
         entities.append(DHLotto645Buy1Button(hass, data.lotto_645_coord.client))
         entities.append(DHLotto645BuyAllButton(hass, data.lotto_645_coord.client))
-    if entry.data.get(CONF_PENSION_720, False):
+    if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         entities.append(DHPension720BuyAutoButton(hass, data.pension_720_coord.client))
         entities.append(DHPension720BuyManualButton(hass, data.pension_720_coord.client))
     async_add_entities(entities)

@@ -57,7 +57,7 @@ class DhLotteryConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> OptionsFlow:
         """옵션 흐름 등록"""
-        return DhLotteryOptionsFlowHandler(config_entry)
+        return DhLotteryOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -86,14 +86,6 @@ class DhLotteryConfigFlow(ConfigFlow, domain=DOMAIN):
 class DhLotteryOptionsFlowHandler(OptionsFlow):
     """옵션 설정을 관리하는 핸들러입니다."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """초기화"""
-        try:
-            super().__init__(config_entry)
-        except TypeError:
-            super().__init__()
-        self.config_entry = config_entry
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -104,6 +96,10 @@ class DhLotteryOptionsFlowHandler(OptionsFlow):
         options = self.config_entry.options
         data = self.config_entry.data
 
+        username = options.get(CONF_USERNAME, data.get(CONF_USERNAME, ""))
+        password = options.get(CONF_PASSWORD, data.get(CONF_PASSWORD, ""))
+        lotto_645 = options.get(CONF_LOTTO_645, data.get(CONF_LOTTO_645, True))
+        pension_720 = options.get(CONF_PENSION_720, data.get(CONF_PENSION_720, True))
         discord_webhook_url = options.get("discord_webhook_url", data.get("discord_webhook_url", ""))
         pension_buy_time = options.get("pension_buy_time", data.get("pension_buy_time", "17:00"))
         pension_buy_weekday = options.get("pension_buy_weekday", data.get("pension_buy_weekday", "목요일"))
@@ -111,6 +107,10 @@ class DhLotteryOptionsFlowHandler(OptionsFlow):
 
         schema = vol.Schema(
             {
+                vol.Required(CONF_USERNAME, default=username): cv.string,
+                vol.Required(CONF_PASSWORD, default=password): cv.string,
+                vol.Optional(CONF_LOTTO_645, default=lotto_645): cv.boolean,
+                vol.Optional(CONF_PENSION_720, default=pension_720): cv.boolean,
                 vol.Optional("discord_webhook_url", default=discord_webhook_url): cv.string,
                 vol.Optional("pension_buy_time", default=pension_buy_time): cv.string,
                 vol.Optional("pension_buy_weekday", default=pension_buy_weekday): vol.In(

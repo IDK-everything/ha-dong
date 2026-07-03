@@ -27,6 +27,10 @@
       "init": {
         "title": "Options",
         "data": {
+          "username": "Username",
+          "password": "Password",
+          "lotto_645": "Lotto 6/45",
+          "pension_720": "Pension Lottery 720+",
           "discord_webhook_url": "Discord Webhook URL",
           "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
           "pension_buy_weekday": "Pension Lottery Auto Buy Weekday",

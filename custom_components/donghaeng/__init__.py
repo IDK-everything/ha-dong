@@ -69,8 +69,8 @@ BUY_PENSION_720_SCHEMA = vol.Schema(
 async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) -> bool:
     """설정 항목을 설정합니다."""
     hass.data.setdefault(DOMAIN, {})
-    username = entry.data[CONF_USERNAME]
-    password = entry.data[CONF_PASSWORD]
+    username = entry.options.get(CONF_USERNAME, entry.data[CONF_USERNAME])
+    password = entry.options.get(CONF_PASSWORD, entry.data[CONF_PASSWORD])
     client = DhLotteryClient(username, password)
     try:
         await client.async_login()
@@ -85,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
     except Exception as ex:
         raise ConfigEntryNotReady(f"예치금 정보 조회 실패: {ex}") from ex
 
-    if entry.data[CONF_LOTTO_645]:
+    if entry.options.get(CONF_LOTTO_645, entry.data[CONF_LOTTO_645]):
         data.lotto_645_coord = DhLotto645Coordinator(
             hass, client, data.lottery_coord.async_clear_refresh
         )
@@ -94,7 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
         except Exception as ex:
             raise ConfigEntryNotReady(f"로또 정보 조회 실패: {ex}") from ex
 
-    if entry.data.get(CONF_PENSION_720, False):
+    if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         data.pension_720_coord = DhPension720Coordinator(
             hass, client, entry, data.lottery_coord.async_clear_refresh
         )

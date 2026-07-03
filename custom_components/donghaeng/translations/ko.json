@@ -78,6 +78,10 @@
       "init": {
         "title": "로또연금 옵션 설정",
         "data": {
+          "username": "아이디",
+          "password": "비밀번호",
+          "lotto_645": "로또 6/45",
+          "pension_720": "연금복권 720+",
           "discord_webhook_url": "디스코드 웹훅 URL (선택)",
           "pension_buy_time": "연금복권 자동 구매 시간 (예: 17:00)",
           "pension_buy_weekday": "연금복권 자동 구매 요일",
