@@ -88,6 +88,10 @@ class DhLotteryOptionsFlowHandler(OptionsFlow):
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """초기화"""
+        try:
+            super().__init__(config_entry)
+        except TypeError:
+            super().__init__()
         self.config_entry = config_entry
 
     async def async_step_init(
