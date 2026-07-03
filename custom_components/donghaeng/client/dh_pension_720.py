@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import asyncio
 import base64
 import re
 from dataclasses import dataclass, field
@@ -262,6 +263,10 @@ class DhPension720:
                 _LOGGER.info(f"예치금 부족으로 인해 남은 수동 번호 구매를 중단합니다. (잔액: {balance.purchase_available}원)")
                 break
 
+            if purchased_orders or failed_candidates:
+                _LOGGER.info("이전 시도 후 세션 안정화를 위해 3초간 대기합니다.")
+                await asyncio.sleep(3)
+
             _LOGGER.info(f"연금복권 수동 후보 번호 {num} 예약 시도 중...")
             try:
                 orderNo, orderDate = await self._async_do_order_request(
@@ -356,6 +361,9 @@ class DhPension720:
 
         # 3. 모든 수동 후보 번호 구매가 실패한 경우에만 자동 번호로 1세트 구매 시도
         if len(success_candidates) == 0:
+            if failed_candidates:
+                _LOGGER.info("이전 수동 시도 실패 후 세션 안정화를 위해 3초간 대기합니다.")
+                await asyncio.sleep(3)
             # 예치금 다시 확인
             balance = await self.client.async_get_balance()
             if balance.purchase_available < 5000:
