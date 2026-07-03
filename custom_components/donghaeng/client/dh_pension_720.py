@@ -274,6 +274,12 @@ class DhPension720:
             except Exception as ex:
                 failed_candidates.append(num)
                 _LOGGER.warning(f"수동 후보 번호 {num} 예약 실패: {ex}")
+                try:
+                    _LOGGER.info("세션 락을 방지하기 위해 세션을 재초기화합니다.")
+                    await self.client.async_login()
+                    keyCode = await self._async_ensure_el_session()
+                except Exception as login_ex:
+                    _LOGGER.warning(f"세션 재초기화 실패: {login_ex}")
                 continue
 
             # 예약 성공 시 바로 결제 시도
@@ -340,6 +346,12 @@ class DhPension720:
             except Exception as ex:
                 failed_candidates.append(num)
                 _LOGGER.error(f"수동 후보 번호 {num} 결제 실패: {ex}")
+                try:
+                    _LOGGER.info("세션 락을 방지하기 위해 세션을 재초기화합니다.")
+                    await self.client.async_login()
+                    keyCode = await self._async_ensure_el_session()
+                except Exception as login_ex:
+                    _LOGGER.warning(f"세션 재초기화 실패: {login_ex}")
                 continue
 
         # 3. 모든 수동 후보 번호 구매가 실패한 경우에만 자동 번호로 1세트 구매 시도
