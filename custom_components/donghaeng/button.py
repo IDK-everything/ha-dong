@@ -33,7 +33,8 @@ async def async_setup_entry(
         entities.append(DHLotto645Buy1Button(hass, data.lotto_645_coord.client))
         entities.append(DHLotto645BuyAllButton(hass, data.lotto_645_coord.client))
     if entry.data.get(CONF_PENSION_720, False):
-        entities.append(DHPension720BuyButton(hass, data.pension_720_coord.client))
+        entities.append(DHPension720BuyAutoButton(hass, data.pension_720_coord.client))
+        entities.append(DHPension720BuyManualButton(hass, data.pension_720_coord.client))
     async_add_entities(entities)
 
 
@@ -129,7 +130,7 @@ class DHLotto645BuyAllButton(DhButton):
             raise DhLotto645Error(result["message"])
 
 
-class DHPension720BuyButton(DhButton):
+class DHPension720BuyAutoButton(DhButton):
     """연금복권 720 1세트(5장) 자동 구매 버튼 엔티티."""
 
     _attr_device_class = ButtonDeviceClass.IDENTIFY
@@ -148,6 +149,35 @@ class DHPension720BuyButton(DhButton):
             BUY_PENSION_720_SERVICE_NAME,
             {
                 "entity_id": self.entity_id,
+                "mode": "auto",
+            },
+            blocking=True,
+            return_response=True,
+        )
+        if result["result"] == "fail":
+            raise DhPension720Error(result["message"])
+
+
+class DHPension720BuyManualButton(DhButton):
+    """연금복권 720 수동 후보군 구매 버튼 엔티티."""
+
+    _attr_device_class = ButtonDeviceClass.IDENTIFY
+    _attr_name = "연금복권 수동 후보군 구매"
+    _attr_icon = "mdi:play-box-multiple-outline"
+
+    def __init__(self, hass: HomeAssistant, client: DhLotteryClient):
+        super().__init__(client, "pension_720_buy_manual")
+        self.hass = hass
+        self._attr_device_info = get_dh_pension_720_device_info(client.username)
+
+    async def async_press(self) -> None:
+        """버튼을 누릅니다."""
+        result = await self.hass.services.async_call(
+            DOMAIN,
+            BUY_PENSION_720_SERVICE_NAME,
+            {
+                "entity_id": self.entity_id,
+                "mode": "manual",
             },
             blocking=True,
             return_response=True,

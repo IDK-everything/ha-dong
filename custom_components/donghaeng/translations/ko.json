@@ -65,6 +65,23 @@
         "entity_id": {
           "name": "예치금 선택",
           "description": "구매할 계정의 예치금 엔티티를 선택해주세요."
+        },
+        "mode": {
+          "name": "구매 방식 (mode)",
+          "description": "manual(수동 후보군 구매) 또는 auto(랜덤 자동 번호 구매)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "로또연금 옵션 설정",
+        "data": {
+          "discord_webhook_url": "디스코드 웹훅 URL (선택)",
+          "pension_buy_time": "연금복권 자동 구매 시간 (예: 17:00)",
+          "pension_buy_weekday": "연금복권 자동 구매 요일",
+          "pension_manual_numbers": "연금복권 수동 구매 후보 번호 (쉼표로 구분)"
         }
       }
     }

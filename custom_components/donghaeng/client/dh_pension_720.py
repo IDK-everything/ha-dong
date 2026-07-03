@@ -469,6 +469,8 @@ class DhPension720:
         """최근 1주일간의 연금복권 구매 내역을 조회합니다."""
         try:
             results = await self.client.async_get_buy_list("LP72")
+            # 최신 구입건이 항상 인덱스 0에 오도록 최신순으로 정렬합니다.
+            results.sort(key=lambda x: (int(x.get("ltEpsd", 0) or 0), x.get("ntslOrdrNo", "") or ""), reverse=True)
             items: List[DhPension720BuyHistoryData] = []
             
             for result in results:

@@ -21,5 +21,18 @@
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options",
+        "data": {
+          "discord_webhook_url": "Discord Webhook URL",
+          "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
+          "pension_buy_weekday": "Pension Lottery Auto Buy Weekday",
+          "pension_manual_numbers": "Pension manual candidate numbers (comma separated)"
+        }
+      }
+    }
   }
 }

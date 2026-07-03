@@ -61,6 +61,7 @@ BUY_LOTTO_645_SCHEMA = vol.Schema(
 BUY_PENSION_720_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("mode", default="manual"): vol.In(["manual", "auto"]),
     }
 )
 
@@ -217,7 +218,17 @@ async def _async_setup_service(
             lottery_data = _find_lottery_data(call.data["entity_id"])
             if not lottery_data.pension_720_coord:
                 raise ValueError("연금복권 코디네이터가 활성화되어 있지 않습니다.")
-            result = await lottery_data.pension_720_coord.pension_720.async_buy()
+            mode = call.data.get("mode", "manual")
+            if mode == "auto":
+                candidates = []
+            else:
+                entry = lottery_data.entry
+                raw_nums = entry.options.get("pension_manual_numbers", entry.data.get("pension_manual_numbers", "810212,810410,120911,150402"))
+                candidates = [x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]
+                if not candidates:
+                    candidates = ["810212", "810410", "120911", "150402"]
+
+            result = await lottery_data.pension_720_coord.pension_720.async_buy(candidates=candidates)
             number_text = "\n".join(
                 [
                      f"- {game.group} {game.numbers} ({game.status})"
@@ -230,7 +241,9 @@ async def _async_setup_service(
             )
             
             # Discord Webhook Notification
-            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            webhook_url = None
+            if lottery_data and lottery_data.entry:
+                webhook_url = lottery_data.entry.options.get("discord_webhook_url", lottery_data.entry.data.get("discord_webhook_url"))
             if webhook_url:
                 failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
                 success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
@@ -256,7 +269,9 @@ async def _async_setup_service(
             )
             
             # Discord Webhook Notification
-            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            webhook_url = None
+            if lottery_data and lottery_data.entry:
+                webhook_url = lottery_data.entry.options.get("discord_webhook_url", lottery_data.entry.data.get("discord_webhook_url"))
             if webhook_url:
                 discord_msg = f"❌ **동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(e)}"
                 hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))

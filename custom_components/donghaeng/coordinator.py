@@ -323,8 +323,8 @@ class DhPension720Coordinator(DhCoordinator):
                 buy_history_this_week = self.data.get("buy_history_this_week", [])
 
             # 3. 설정된 요일/시간에 따른 백그라운드 자동 구매 스케줄러 실행
-            buy_time_str = self.entry.data.get("pension_buy_time", "17:00")
-            buy_weekday_str = self.entry.data.get("pension_buy_weekday", "목요일")
+            buy_time_str = self.entry.options.get("pension_buy_time", self.entry.data.get("pension_buy_time", "17:00"))
+            buy_weekday_str = self.entry.options.get("pension_buy_weekday", self.entry.data.get("pension_buy_weekday", "목요일"))
 
             weekday_map = {"월요일": 0, "화요일": 1, "수요일": 2, "목요일": 3, "금요일": 4, "토요일": 5, "일요일": 6}
             configured_weekday = weekday_map.get(buy_weekday_str, 3)
@@ -361,12 +361,17 @@ class DhPension720Coordinator(DhCoordinator):
                     self._last_pension_buy_attempt_round = target_round
                     self._last_pension_buy_attempt_time = now
                     try:
-                        result = await self.pension_720.async_buy()
+                        raw_nums = self.entry.options.get("pension_manual_numbers", self.entry.data.get("pension_manual_numbers", "810212,810410,120911,150402"))
+                        candidates = [x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]
+                        if not candidates:
+                            candidates = ["810212", "810410", "120911", "150402"]
+
+                        result = await self.pension_720.async_buy(candidates=candidates)
                         await self.lottery_refresh_func()
                         buy_history_this_week = await self.pension_720.async_get_buy_history_this_week()
                         
                         # Discord Webhook Notification
-                        webhook_url = self.entry.data.get("discord_webhook_url") if self.entry else None
+                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
                         if webhook_url:
                             number_text = "\n".join(
                                 [
@@ -391,7 +396,7 @@ class DhPension720Coordinator(DhCoordinator):
                         _LOGGER.error(f"백그라운드 연금복권 자동 구매 중 오류 발생: {ex}")
                         
                         # Discord Webhook Notification
-                        webhook_url = self.entry.data.get("discord_webhook_url") if self.entry else None
+                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
                         if webhook_url:
                             discord_msg = f"❌ **[자동] 동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(ex)}"
                             self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
