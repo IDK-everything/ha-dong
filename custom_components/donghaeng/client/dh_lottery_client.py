@@ -263,8 +263,10 @@ class DhLotteryClient:
         if not webhook_url:
             return
         try:
-            async with self.session.post(webhook_url, json={"content": message}) as resp:
-                if resp.status not in (200, 204):
-                    _LOGGER.error(f"디스코드 웹훅 응답 오류 (상태코드: {resp.status})")
+            import aiohttp as _aiohttp
+            async with _aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json={"content": message}) as resp:
+                    if resp.status not in (200, 204):
+                        _LOGGER.error(f"디스코드 웹훅 응답 오류 (상태코드: {resp.status})")
         except Exception as ex:
             _LOGGER.error(f"디스코드 웹훅 전송 중 오류 발생: {ex}")

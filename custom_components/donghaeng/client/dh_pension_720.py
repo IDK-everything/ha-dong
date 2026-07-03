@@ -238,6 +238,13 @@ class DhPension720:
         if balance.purchase_available < 5000:
             raise DhPension720Error(f"❗예치금이 부족합니다. (예치금: {balance.purchase_available}원 / 필요금액: 5,000원)")
 
+        # 이전 시도로 인한 세션 락(구매 진행중인 복권 존재) 방지를 위해 새로 로그인하여 세션을 갱신합니다.
+        try:
+            _LOGGER.info("신규 구매 프로세스를 시작하기 위해 세션을 재로그인합니다.")
+            await self.client.async_login()
+        except Exception as login_ex:
+            _LOGGER.warning(f"초기 세션 재로그인 실패 (무시됨): {login_ex}")
+
         jsessionid = await self._async_ensure_el_session()
         keyCode = jsessionid
 
@@ -290,10 +297,12 @@ class DhPension720:
             # 예약 성공 시 바로 결제 시도
             _LOGGER.info(f"수동 후보 번호 {num} 예약 성공! 결제 진행 중... (주문번호: {orderNo})")
             try:
-                buy_no_str = "".join([f"{i}{num}%2C" for i in range(1, 6)])[:-3]
+                # BUY_NO 형식: "1{num},{2{num},3{num},4{num},5{num}"
+                # conn_payload는 암호화 전 평문이므로 일반 쉼표(,)를 사용합니다.
+                buy_no_str = ",".join([f"{i}{num}" for i in range(1, 6)])
                 conn_payload = (
                     f"ROUND={win720_round}&FLAG=&BUY_KIND=01&BUY_NO={buy_no_str}&BUY_CNT=5"
-                    f"&BUY_SET_TYPE=SA%2CSA%2CSA%2CSA%2CSA&BUY_TYPE=M%2CM%2CM%2CM%2CM%2C&CS_TYPE=01"
+                    f"&BUY_SET_TYPE=SA,SA,SA,SA,SA&BUY_TYPE=M,M,M,M,M,&CS_TYPE=01"
                     f"&orderNo={orderNo}&orderDate={orderDate}&TRANSACTION_ID=&WIN_DATE="
                     f"&USER_ID={self.client.username}&PAY_TYPE=&resultErrorCode=&resultErrorMsg=&resultOrderNo="
                     f"&WORKING_FLAG=true&NUM_CHANGE_TYPE=&auto_process=N&set_type=SA&classnum=&selnum=&buytype=M"
