@@ -238,10 +238,10 @@ async def _async_setup_service(
                 discord_msg = (
                     f"📢 **동행복권 연금복권 720+ 구매 완료**\n"
                     f"- **회차**: 제 {result.round_no}회\n"
-                    f"- **발행일**: {result.issue_dt}\n"
+                    f"- **구매일시**: {result.issue_dt}\n"
                     f"- **주문번호**: {result.order_no}\n"
-                    f"- **성공 번호 (수동 후보)**: {success_candidate_str}\n"
-                    f"- **실패 번호 (수동 후보)**: {failed_candidates_str}\n"
+                    f"- **성공번호**: {success_candidate_str}\n"
+                    f"- **실패번호**: {failed_candidates_str}\n"
                     f"- **구매 번호**:\n{number_text}"
                 )
                 hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
