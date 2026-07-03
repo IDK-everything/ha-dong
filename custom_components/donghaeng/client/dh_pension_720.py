@@ -44,6 +44,7 @@ class DhPension720BuyData:
     games: List[DhPension720Game] = field(default_factory=list)
     failed_candidates: List[str] = field(default_factory=list)
     success_candidate: Optional[str] = None
+    remaining_balance: int = 0
 
     def to_dict(self) -> Dict:
         """데이터를 사전 형식으로 변환합니다."""
@@ -54,6 +55,7 @@ class DhPension720BuyData:
             "games": [game.__dict__ for game in self.games],
             "failed_candidates": self.failed_candidates,
             "success_candidate": self.success_candidate,
+            "remaining_balance": self.remaining_balance,
         }
 
 
@@ -220,9 +222,9 @@ class DhPension720:
         except Exception as ex:
             raise DhPension720Error(f"주문 예약 결과 처리 실패 ({ex}): {decrypted_order[:200]}...")
 
-    async def async_buy(self, candidates: Optional[List[str]] = None) -> DhPension720BuyData:
-        """연금복권을 수동 후보군 모두 구매하거나, 모두 실패 시 자동으로 구매합니다."""
-        _LOGGER.info("연금복권 구매 시작")
+    async def async_buy(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
+        """연금복권을 수동 후보군 모두 구매합니다. allow_auto_fallback=True이면 전체 실패 시 자동 번호로 구매합니다."""
+        _LOGGER.info(f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'})")
         
         now = datetime.datetime.now()
         if now.weekday() == 3 and 17 <= now.hour < 20:
@@ -368,7 +370,12 @@ class DhPension720:
                     _LOGGER.warning(f"세션 재초기화 실패: {login_ex}")
                 continue
 
-        # 3. 모든 수동 후보 번호 구매가 실패한 경우에만 자동 번호로 1세트 구매 시도
+        # 3. 모든 수동 후보 번호 구매가 실패한 경우 처리
+        if len(success_candidates) == 0 and not allow_auto_fallback:
+            # 자동 폴백이 비허용(수동 전용 모드)인 경우: 바로 에러 반환
+            failed_str = ", ".join(failed_candidates)
+            raise DhPension720Error(f"수동 후보 번호({failed_str}) 구매에 모두 실패했습니다. (이미 구매된 번호이거나 판매 종료된 번호입니다.)")
+
         if len(success_candidates) == 0:
             if failed_candidates:
                 _LOGGER.info("이전 수동 시도 실패 후 세션 안정화를 위해 3초간 대기합니다.")
@@ -482,14 +489,21 @@ class DhPension720:
             except Exception as ex:
                 raise DhPension720Error(f"자동 번호 결제 실패: {ex}")
 
-        # 최종 결과 반환
+        # 최종 결과 반환 전 잔여 예치금 조회
+        try:
+            final_balance = await self.client.async_get_balance()
+            remaining_balance = final_balance.purchase_available
+        except Exception:
+            remaining_balance = 0
+
         buy_data = DhPension720BuyData(
             round_no=target_round,
             order_no=",".join(purchased_orders),
             issue_dt=issue_dt,
             games=all_games,
             failed_candidates=failed_candidates,
-            success_candidate=",".join(success_candidates) if success_candidates else None
+            success_candidate=",".join(success_candidates) if success_candidates else None,
+            remaining_balance=remaining_balance
         )
 
         return buy_data

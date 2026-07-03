@@ -221,14 +221,17 @@ async def _async_setup_service(
             mode = call.data.get("mode", "manual")
             if mode == "auto":
                 candidates = []
+                allow_auto_fallback = True
             else:
                 entry = lottery_data.entry
                 raw_nums = entry.options.get("pension_manual_numbers", entry.data.get("pension_manual_numbers", "810212,810410,120911,150402"))
                 candidates = [x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]
                 if not candidates:
                     candidates = ["810212", "810410", "120911", "150402"]
+                # 수동 버튼에서는 자동 번호 폴백 없이 수동 번호만 구매합니다.
+                allow_auto_fallback = False
 
-            result = await lottery_data.pension_720_coord.pension_720.async_buy(candidates=candidates)
+            result = await lottery_data.pension_720_coord.pension_720.async_buy(candidates=candidates, allow_auto_fallback=allow_auto_fallback)
             number_text = "\n".join(
                 [
                      f"- {game.group} {game.numbers} ({game.status})"
@@ -247,6 +250,7 @@ async def _async_setup_service(
             if webhook_url:
                 failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
                 success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
+                remaining_balance = getattr(result, 'remaining_balance', 0)
                 
                 discord_msg = (
                     f"📢 **동행복권 연금복권 720+ 구매 완료**\n"
@@ -255,6 +259,7 @@ async def _async_setup_service(
                     f"- **주문번호**: {result.order_no}\n"
                     f"- **성공번호**: {success_candidate_str}\n"
                     f"- **실패번호**: {failed_candidates_str}\n"
+                    f"- **잔여 예치금**: {remaining_balance:,}원\n"
                     f"- **구매 번호**:\n{number_text}"
                 )
                 hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))

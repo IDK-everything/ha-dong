@@ -381,6 +381,7 @@ class DhPension720Coordinator(DhCoordinator):
                             )
                             failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
                             success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
+                            remaining_balance = getattr(result, 'remaining_balance', 0)
                             
                             discord_msg = (
                                 f"📢 **[자동] 동행복권 연금복권 720+ 구매 완료**\n"
@@ -389,6 +390,7 @@ class DhPension720Coordinator(DhCoordinator):
                                 f"- **주문번호**: {result.order_no}\n"
                                 f"- **성공번호**: {success_candidate_str}\n"
                                 f"- **실패번호**: {failed_candidates_str}\n"
+                                f"- **잔여 예치금**: {remaining_balance:,}원\n"
                                 f"- **구매 번호**:\n{number_text}"
                             )
                             self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
