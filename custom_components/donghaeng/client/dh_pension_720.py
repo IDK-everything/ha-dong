@@ -362,6 +362,8 @@ class DhPension720:
             inner_msg = parsed_conn.get("resultMessage") or parsed_conn.get("resultMsg") or "결제 실패"
 
         if inner_code != "100":
+            if inner_code == "120":
+                raise DhPension720Error("❗연금복권 결제 실패: 해당 회차(323회)의 구매 한도를 초과하였거나 동일한 번호를 이미 구매하셨습니다. (실제 동행복권 사이트에서 정상 구입 완료된 상태입니다.)")
             raise DhPension720Error(f"❗연금복권 결제 실패: {inner_msg}")
 
         games = []
