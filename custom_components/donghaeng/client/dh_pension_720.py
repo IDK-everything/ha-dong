@@ -220,7 +220,7 @@ class DhPension720:
             raise DhPension720Error(f"주문 예약 결과 처리 실패 ({ex}): {decrypted_order[:200]}...")
 
     async def async_buy(self, candidates: Optional[List[str]] = None) -> DhPension720BuyData:
-        """연금복권을 1세트(5장) 수동 후보군 순차 구매 또는 자동으로 구매합니다."""
+        """연금복권을 수동 후보군 모두 구매하거나, 모두 실패 시 자동으로 구매합니다."""
         _LOGGER.info("연금복권 구매 시작")
         
         now = datetime.datetime.now()
@@ -229,6 +229,10 @@ class DhPension720:
         if 0 <= now.hour < 6:
              raise DhPension720Error("❗구매 가능 시간이 아닙니다. (매일 6시부터 24시까지 구매 가능)")
 
+        if candidates is None:
+            candidates = ["810212", "810410", "120911", "150402"]
+
+        # 1. 예치금 잔액 조회
         balance = await self.client.async_get_balance()
         if balance.purchase_available < 5000:
             raise DhPension720Error(f"❗예치금이 부족합니다. (예치금: {balance.purchase_available}원 / 필요금액: 5,000원)")
@@ -239,21 +243,25 @@ class DhPension720:
         latest_round = await self.async_get_latest_round_no()
         target_round = latest_round + 1
         win720_round = str(target_round)
+        last_episode = str(latest_round)
 
         headers = self.client.session.headers.copy()
         headers.update(self._REQ_HEADERS)
 
-        if candidates is None:
-            candidates = ["810212", "810410", "120911", "150402"]
-
-        reserved_num = None
-        orderNo = None
-        orderDate = None
+        purchased_orders = []
+        all_games = []
         failed_candidates = []
-        success_candidate = None
+        success_candidates = []
+        issue_dt = None
 
-        last_episode = str(latest_round)
+        # 2. 수동 후보 번호들에 대해 가능한 한 모두 구매 시도
         for num in candidates:
+            # 예치금이 부족하면 루프를 탈출
+            balance = await self.client.async_get_balance()
+            if balance.purchase_available < 5000:
+                _LOGGER.info(f"예치금 부족으로 인해 남은 수동 번호 구매를 중단합니다. (잔액: {balance.purchase_available}원)")
+                break
+
             _LOGGER.info(f"연금복권 수동 후보 번호 {num} 예약 시도 중...")
             try:
                 orderNo, orderDate = await self._async_do_order_request(
@@ -263,16 +271,84 @@ class DhPension720:
                     key_code=keyCode,
                     headers=headers
                 )
-                reserved_num = num
-                success_candidate = num
-                _LOGGER.info(f"수동 후보 번호 {num} 예약 성공! (주문번호: {orderNo})")
-                break
             except Exception as ex:
                 failed_candidates.append(num)
-                _LOGGER.warning(f"수동 후보 번호 {num} 예약 실패 (다음 후보 시도): {ex}")
+                _LOGGER.warning(f"수동 후보 번호 {num} 예약 실패: {ex}")
                 continue
 
-        if not reserved_num:
+            # 예약 성공 시 바로 결제 시도
+            _LOGGER.info(f"수동 후보 번호 {num} 예약 성공! 결제 진행 중... (주문번호: {orderNo})")
+            try:
+                buy_no_str = "".join([f"{i}{num}%2C" for i in range(1, 6)])[:-3]
+                conn_payload = (
+                    f"ROUND={win720_round}&FLAG=&BUY_KIND=01&BUY_NO={buy_no_str}&BUY_CNT=5"
+                    f"&BUY_SET_TYPE=SA%2CSA%2CSA%2CSA%2CSA&BUY_TYPE=M%2CM%2CM%2CM%2CM%2C&CS_TYPE=01"
+                    f"&orderNo={orderNo}&orderDate={orderDate}&TRANSACTION_ID=&WIN_DATE="
+                    f"&USER_ID={self.client.username}&PAY_TYPE=&resultErrorCode=&resultErrorMsg=&resultOrderNo="
+                    f"&WORKING_FLAG=true&NUM_CHANGE_TYPE=&auto_process=N&set_type=SA&classnum=&selnum=&buytype=M"
+                    f"&num1=&num2=&num3=&num4=&num5=&num6=&DSEC=34&CLOSE_DATE=&verifyYN=N"
+                    f"&curdeposit=&curpay=5000&DROUND={win720_round}&DSEC=0&CLOSE_DATE=&verifyYN=N&lotto720_radio_group=on"
+                )
+                enc_conn_payload = self._encText(conn_payload, keyCode)
+
+                resp = await self.client.session.post(
+                    url="https://el.dhlottery.co.kr/connPro.do",
+                    headers=headers,
+                    data={"q": urllib.parse.quote(enc_conn_payload, safe='')}
+                )
+                resp_text = await resp.text()
+                conn_ret = json.loads(resp_text)
+                q_val = conn_ret.get('q')
+                if not q_val:
+                     raise DhPension720Error(f"connPro 응답이 올바르지 않습니다: {resp_text[:100]}")
+                
+                decrypted_conn = self._decText(q_val, keyCode)
+                fixed_conn = re.sub(r'"resultCode"\s*:\s*"(\{.*?\})"\s*(,|\})', r'"resultCode": \1\2', decrypted_conn)
+                parsed_conn = json.loads(fixed_conn)
+                
+                result_code_info = parsed_conn.get("resultCode", {})
+                if isinstance(result_code_info, dict):
+                    inner_code = result_code_info.get("resultCode")
+                    inner_msg = result_code_info.get("resultMessage", "결제 실패")
+                else:
+                    inner_code = str(result_code_info)
+                    inner_msg = parsed_conn.get("resultMessage") or parsed_conn.get("resultMsg") or "결제 실패"
+
+                if inner_code != "100":
+                    if inner_code == "120":
+                        raise DhPension720Error(f"해당 회차({target_round}회)의 구매 한도를 초과하였거나 동일한 번호를 이미 구매하셨습니다.")
+                    raise DhPension720Error(inner_msg)
+
+                # 결제 성공 시 티켓 정보 저장
+                purchased_orders.append(orderNo)
+                success_candidates.append(num)
+                if not issue_dt:
+                    issue_dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                for i in range(1, 6):
+                    all_games.append(
+                        DhPension720Game(
+                            group=f"{i}조",
+                            numbers=num,
+                            mode="수동",
+                            status="미추첨",
+                            rank=-1
+                        )
+                    )
+                _LOGGER.info(f"연금복권 수동 후보 번호 {num} 구매 완료! (주문번호: {orderNo})")
+
+            except Exception as ex:
+                failed_candidates.append(num)
+                _LOGGER.error(f"수동 후보 번호 {num} 결제 실패: {ex}")
+                continue
+
+        # 3. 모든 수동 후보 번호 구매가 실패한 경우에만 자동 번호로 1세트 구매 시도
+        if len(success_candidates) == 0:
+            # 예치금 다시 확인
+            balance = await self.client.async_get_balance()
+            if balance.purchase_available < 5000:
+                raise DhPension720Error(f"모든 수동 후보 구매 실패 후 예치금 부족으로 자동 구매 실패. (잔액: {balance.purchase_available}원)")
+
             _LOGGER.info("모든 수동 후보 번호 예약에 실패하여 자동 번호로 구매를 진행합니다.")
             payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={last_episode}&AUTO_SEL_SET=SA&SEL_CLASS=&BUY_TYPE=A&ACCS_TYPE=01"
             enc_payload = self._encText(payload, keyCode)
@@ -314,81 +390,79 @@ class DhPension720:
                     key_code=keyCode,
                     headers=headers
                 )
-                reserved_num = extracted_num
             except Exception as ex:
                 raise DhPension720Error(f"자동 번호 예약 생성 실패: {ex}")
 
-        # 결제 진행
-        buy_no_str = "".join([f"{i}{reserved_num}%2C" for i in range(1, 6)])[:-3]
-        conn_payload = (
-            f"ROUND={win720_round}&FLAG=&BUY_KIND=01&BUY_NO={buy_no_str}&BUY_CNT=5"
-            f"&BUY_SET_TYPE=SA%2CSA%2CSA%2CSA%2CSA&BUY_TYPE=A%2CA%2CA%2CA%2CA%2C&CS_TYPE=01"
-            f"&orderNo={orderNo}&orderDate={orderDate}&TRANSACTION_ID=&WIN_DATE="
-            f"&USER_ID={self.client.username}&PAY_TYPE=&resultErrorCode=&resultErrorMsg=&resultOrderNo="
-            f"&WORKING_FLAG=true&NUM_CHANGE_TYPE=&auto_process=N&set_type=SA&classnum=&selnum=&buytype=M"
-            f"&num1=&num2=&num3=&num4=&num5=&num6=&DSEC=34&CLOSE_DATE=&verifyYN=N"
-            f"&curdeposit=&curpay=5000&DROUND={win720_round}&DSEC=0&CLOSE_DATE=&verifyYN=N&lotto720_radio_group=on"
-        )
-        enc_conn_payload = self._encText(conn_payload, keyCode)
-
-        try:
-            resp = await self.client.session.post(
-                url="https://el.dhlottery.co.kr/connPro.do",
-                headers=headers,
-                data={"q": urllib.parse.quote(enc_conn_payload, safe='')}
-            )
-            resp_text = await resp.text()
-            conn_ret = json.loads(resp_text)
-            q_val = conn_ret.get('q')
-            if not q_val:
-                 raise DhPension720Error(f"connPro 응답이 올바르지 않습니다: {resp_text[:100]}")
-        except Exception as ex:
-            raise DhPension720Error(f"결제 진행(connPro) 중 오류가 발생했습니다: {ex}")
-
-        decrypted_conn = self._decText(q_val, keyCode)
-        # 서버에서 응답 시 nested JSON(resultCode)의 따옴표가 이스케이프되지 않아 JSON이 깨지는 현상을 수정합니다.
-        fixed_conn = re.sub(r'"resultCode"\s*:\s*"(\{.*?\})"\s*(,|\})', r'"resultCode": \1\2', decrypted_conn)
-        try:
-            parsed_conn = json.loads(fixed_conn)
-        except Exception as ex:
-            raise DhPension720Error(f"결제 결과 복호화 실패: {decrypted_conn[:200]}...")
-
-        result_code_info = parsed_conn.get("resultCode", {})
-        if isinstance(result_code_info, dict):
-            inner_code = result_code_info.get("resultCode")
-            inner_msg = result_code_info.get("resultMessage", "결제 실패")
-        else:
-            inner_code = str(result_code_info)
-            inner_msg = parsed_conn.get("resultMessage") or parsed_conn.get("resultMsg") or "결제 실패"
-
-        if inner_code != "100":
-            if inner_code == "120":
-                raise DhPension720Error("❗연금복권 결제 실패: 해당 회차(323회)의 구매 한도를 초과하였거나 동일한 번호를 이미 구매하셨습니다. (실제 동행복권 사이트에서 정상 구입 완료된 상태입니다.)")
-            raise DhPension720Error(f"❗연금복권 결제 실패: {inner_msg}")
-
-        games = []
-        is_manual = reserved_num in candidates
-        for i in range(1, 6):
-            games.append(
-                DhPension720Game(
-                    group=f"{i}조",
-                    numbers=reserved_num,
-                    mode="수동" if is_manual else "자동",
-                    status="미추첨",
-                    rank=-1
+            _LOGGER.info(f"자동 생성 번호 {extracted_num} 예약 성공! 결제 진행 중... (주문번호: {orderNo})")
+            try:
+                buy_no_str = "".join([f"{i}{extracted_num}%2C" for i in range(1, 6)])[:-3]
+                conn_payload = (
+                    f"ROUND={win720_round}&FLAG=&BUY_KIND=01&BUY_NO={buy_no_str}&BUY_CNT=5"
+                    f"&BUY_SET_TYPE=SA%2CSA%2CSA%2CSA%2CSA&BUY_TYPE=A%2CA%2CA%2CA%2CA%2C&CS_TYPE=01"
+                    f"&orderNo={orderNo}&orderDate={orderDate}&TRANSACTION_ID=&WIN_DATE="
+                    f"&USER_ID={self.client.username}&PAY_TYPE=&resultErrorCode=&resultErrorMsg=&resultOrderNo="
+                    f"&WORKING_FLAG=true&NUM_CHANGE_TYPE=&auto_process=N&set_type=SA&classnum=&selnum=&buytype=M"
+                    f"&num1=&num2=&num3=&num4=&num5=&num6=&DSEC=34&CLOSE_DATE=&verifyYN=N"
+                    f"&curdeposit=&curpay=5000&DROUND={win720_round}&DSEC=0&CLOSE_DATE=&verifyYN=N&lotto720_radio_group=on"
                 )
-            )
+                enc_conn_payload = self._encText(conn_payload, keyCode)
 
+                resp = await self.client.session.post(
+                    url="https://el.dhlottery.co.kr/connPro.do",
+                    headers=headers,
+                    data={"q": urllib.parse.quote(enc_conn_payload, safe='')}
+                )
+                resp_text = await resp.text()
+                conn_ret = json.loads(resp_text)
+                q_val = conn_ret.get('q')
+                if not q_val:
+                     raise DhPension720Error(f"connPro 응답이 올바르지 않습니다: {resp_text[:100]}")
+                
+                decrypted_conn = self._decText(q_val, keyCode)
+                fixed_conn = re.sub(r'"resultCode"\s*:\s*"(\{.*?\})"\s*(,|\})', r'"resultCode": \1\2', decrypted_conn)
+                parsed_conn = json.loads(fixed_conn)
+                
+                result_code_info = parsed_conn.get("resultCode", {})
+                if isinstance(result_code_info, dict):
+                    inner_code = result_code_info.get("resultCode")
+                    inner_msg = result_code_info.get("resultMessage", "결제 실패")
+                else:
+                    inner_code = str(result_code_info)
+                    inner_msg = parsed_conn.get("resultMessage") or parsed_conn.get("resultMsg") or "결제 실패"
+
+                if inner_code != "100":
+                    if inner_code == "120":
+                        raise DhPension720Error("해당 회차의 구매 한도를 초과하였거나 동일한 번호를 이미 구매하셨습니다.")
+                    raise DhPension720Error(inner_msg)
+
+                purchased_orders.append(orderNo)
+                issue_dt = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                for i in range(1, 6):
+                    all_games.append(
+                        DhPension720Game(
+                            group=f"{i}조",
+                            numbers=extracted_num,
+                            mode="자동",
+                            status="미추첨",
+                            rank=-1
+                        )
+                    )
+                _LOGGER.info(f"연금복권 자동 번호 구매 완료! (주문번호: {orderNo})")
+
+            except Exception as ex:
+                raise DhPension720Error(f"자동 번호 결제 실패: {ex}")
+
+        # 최종 결과 반환
         buy_data = DhPension720BuyData(
             round_no=target_round,
-            order_no=orderNo,
-            issue_dt=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            games=games,
+            order_no=",".join(purchased_orders),
+            issue_dt=issue_dt,
+            games=all_games,
             failed_candidates=failed_candidates,
-            success_candidate=success_candidate
+            success_candidate=",".join(success_candidates) if success_candidates else None
         )
 
-        _LOGGER.info(f"연금복권 {target_round}회 1세트 구매 완료 (수동여부: {is_manual}, 주문번호: {orderNo})")
         return buy_data
 
     async def async_get_buy_history_this_week(self) -> List[DhPension720BuyHistoryData]:
