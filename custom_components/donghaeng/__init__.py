@@ -296,7 +296,8 @@ async def _async_setup_service(
         REFRESH_LOTTERY_SERVICE_NAME,
         _async_lottery_refresh,
     )
-    if entry.data[CONF_LOTTO_645]:
+    # options에 저장된 값을 우선 확인하고, 없으면 data에서 가져옵니다.
+    if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         hass.services.async_register(
             DOMAIN,
             BUY_LOTTO_645_SERVICE_NAME,
@@ -304,7 +305,7 @@ async def _async_setup_service(
             schema=BUY_LOTTO_645_SCHEMA,
             supports_response=SupportsResponse.ONLY,
         )
-    if entry.data.get(CONF_PENSION_720, False):
+    if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         hass.services.async_register(
             DOMAIN,
             BUY_PENSION_720_SERVICE_NAME,
