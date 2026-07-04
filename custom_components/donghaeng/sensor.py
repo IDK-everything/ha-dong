@@ -44,11 +44,11 @@ async def async_setup_entry(
         DhDepositSensor(data.lottery_coord),
         DhAccumulatedPrizeSensor(data.lottery_coord),
     ]
-    if entry.data[CONF_LOTTO_645]:
+    if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         entities.append(DhLotto645WinningSensor(data.lotto_645_coord))
         for i in range(1, 6):
             entities.append(DhLotto645HistorySensor(data.lotto_645_coord, i))
-    if entry.data.get(CONF_PENSION_720, False):
+    if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         entities.append(DhPension720WinningSensor(data.pension_720_coord))
         for i in range(1, 6):
             entities.append(DhPension720HistorySensor(data.pension_720_coord, i))

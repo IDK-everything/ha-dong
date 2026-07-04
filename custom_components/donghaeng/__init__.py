@@ -85,7 +85,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
     except Exception as ex:
         raise ConfigEntryNotReady(f"예치금 정보 조회 실패: {ex}") from ex
 
-    if entry.options.get(CONF_LOTTO_645, entry.data[CONF_LOTTO_645]):
+    if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         data.lotto_645_coord = DhLotto645Coordinator(
             hass, client, data.lottery_coord.async_clear_refresh
         )
@@ -141,9 +141,12 @@ async def _async_setup_service(
         registry = er.async_get(hass)
         registry_entry = registry.async_get(deposit_id)
         if not registry_entry:
-            raise ValueError(f"예치금 엔티티 '{deposit_id}'를 찾을 수 없습니다.")
-        if registry_entry.config_entry_id not in hass.data[DOMAIN]:
-            raise ValueError(f"예치금 엔티티 '{deposit_id}'를 찾을 수 없습니다.")
+            registered = [e.entity_id for e in registry.entities.values() if "dh_" in e.entity_id]
+            _LOGGER.error(f"엔티티 '{deposit_id}'를 찾을 수 없습니다. 등록된 dh_ 엔티티 목록: {registered}")
+            raise ValueError(f"엔티티 '{deposit_id}'를 찾을 수 없습니다. HA 개발자 도구에서 실제 entity_id를 확인하세요.")
+        if registry_entry.config_entry_id not in hass.data.get(DOMAIN, {}):
+            _LOGGER.error(f"엔티티 '{deposit_id}'의 config_entry_id={registry_entry.config_entry_id}가 hass.data['{DOMAIN}']에 없습니다. 현재 키: {list(hass.data.get(DOMAIN, {}).keys())}")
+            raise ValueError(f"엔티티 '{deposit_id}'에 연결된 통합구성요소 데이터를 찾을 수 없습니다. HA를 재시작하세요.")
         return hass.data[DOMAIN][registry_entry.config_entry_id]
 
     async def _async_buy_lotto_645(call: ServiceCall) -> ServiceResponse:
