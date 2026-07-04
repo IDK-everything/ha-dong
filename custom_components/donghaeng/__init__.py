@@ -175,12 +175,14 @@ async def _async_setup_service(
             )
             
             # Discord Webhook Notification
-            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            webhook_url = None
+            if lottery_data and lottery_data.entry:
+                webhook_url = lottery_data.entry.options.get("discord_webhook_url", lottery_data.entry.data.get("discord_webhook_url"))
             if webhook_url:
                 discord_msg = (
                     f"📢 **동행복권 로또 6/45 구매 완료**\n"
                     f"- **회차**: 제 {result.round_no}회\n"
-                    f"- **발행일**: {result.issue_dt}\n"
+                    f"- **구매일시**: {result.issue_dt}\n"
                     f"- **바코드**: {result.barcode}\n"
                     f"- **구매 번호**:\n{number_text}"
                 )
@@ -196,7 +198,9 @@ async def _async_setup_service(
             )
             
             # Discord Webhook Notification
-            webhook_url = lottery_data.entry.data.get("discord_webhook_url") if lottery_data and lottery_data.entry else None
+            webhook_url = None
+            if lottery_data and lottery_data.entry:
+                webhook_url = lottery_data.entry.options.get("discord_webhook_url", lottery_data.entry.data.get("discord_webhook_url"))
             if webhook_url:
                 discord_msg = f"❌ **동행복권 로또 6/45 구매 실패**\n- **사유**: {str(e)}"
                 hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))
