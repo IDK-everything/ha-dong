@@ -182,11 +182,13 @@ async def _async_setup_service(
             if lottery_data and lottery_data.entry:
                 webhook_url = lottery_data.entry.options.get("discord_webhook_url", lottery_data.entry.data.get("discord_webhook_url"))
             if webhook_url:
+                remaining_balance = getattr(result, 'remaining_balance', 0)
                 discord_msg = (
                     f"📢 **동행복권 로또 6/45 구매 완료**\n"
                     f"- **회차**: 제 {result.round_no}회\n"
                     f"- **구매일시**: {result.issue_dt}\n"
                     f"- **바코드**: {result.barcode}\n"
+                    f"- **잔여 예치금**: {remaining_balance:,}원\n"
                     f"- **구매 번호**:\n{number_text}"
                 )
                 hass.async_create_task(lottery_data.lottery_coord.client.async_send_to_discord(webhook_url, discord_msg))

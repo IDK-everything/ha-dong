@@ -100,6 +100,7 @@ class DhLotto645:
         barcode: str
         issue_dt: str
         games: List["DhLotto645.Game"] = field(default_factory=lambda: [])
+        remaining_balance: int = 0
 
         def to_dict(self) -> Dict:
             """데이터를 사전 형식으로 변환합니다."""
@@ -108,6 +109,7 @@ class DhLotto645:
                 "barcode": self.barcode,
                 "issue_dt": self.issue_dt,
                 "games": [game.__dict__ for game in self.games],
+                "remaining_balance": self.remaining_balance,
             }
 
     @dataclass
@@ -309,7 +311,14 @@ class DhLotto645:
                 raise DhLotto645Error(
                     f"❗로또6/45 구매에 실패했습니다. (사유: {response['result']['resultMsg']})"
                 )
-            return parse_result(response["result"])
+            buy_result = parse_result(response["result"])
+            # 구매 완료 후 잔여 예치금 조회
+            try:
+                final_balance = await self.client.async_get_balance()
+                buy_result.remaining_balance = final_balance.purchase_available
+            except Exception:
+                pass
+            return buy_result
         except DhLotteryError:
             raise
         except Exception as ex:
