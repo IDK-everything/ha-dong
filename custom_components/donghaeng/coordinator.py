@@ -333,7 +333,12 @@ class DhPension720Coordinator(DhCoordinator):
             if now.weekday() == configured_weekday:
                 try:
                     buy_hour, buy_minute = map(int, buy_time_str.split(":"))
-                    if now.time() >= datetime.time(buy_hour, buy_minute):
+                    # 설정 시각부터 정확히 5분 이내에만 구매 시도 (이후 재시도 방지)
+                    configured_time = datetime.time(buy_hour, buy_minute)
+                    now_time = now.time()
+                    now_minutes = now_time.hour * 60 + now_time.minute
+                    cfg_minutes = configured_time.hour * 60 + configured_time.minute
+                    if 0 <= (now_minutes - cfg_minutes) < 5:
                         is_buy_time = True
                 except Exception as ex:
                     _LOGGER.error(f"구매 시간 파싱 실패 (값: {buy_time_str}): {ex}")
@@ -366,7 +371,9 @@ class DhPension720Coordinator(DhCoordinator):
                         if not candidates:
                             candidates = ["810212", "810410", "120911", "150402"]
 
-                        result = await self.pension_720.async_buy(candidates=candidates)
+                        result = await self.pension_720.async_buy(candidates=candidates, allow_auto_fallback=True)
+                        # 구매 후 내역 캐시를 즉시 무효화하여 already_bought가 다음 체크에서 정확히 반영되도록 합니다.
+                        self._buy_history_last_updated = None
                         await self.lottery_refresh_func()
                         buy_history_this_week = await self.pension_720.async_get_buy_history_this_week()
                         

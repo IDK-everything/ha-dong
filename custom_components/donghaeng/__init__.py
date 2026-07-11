@@ -298,6 +298,9 @@ async def _async_setup_service(
             if lottery_data:
                 await lottery_data.lottery_coord.async_clear_refresh()
                 if lottery_data.pension_720_coord:
+                    # 구매 내역 캐시를 즉시 무효화하여 백그라운드 스케줄러의
+                    # already_bought 체크가 최신 구매 상태를 정확히 반영하도록 합니다.
+                    lottery_data.pension_720_coord._buy_history_last_updated = None
                     await lottery_data.pension_720_coord.async_clear_refresh()
 
     hass.services.async_register(
