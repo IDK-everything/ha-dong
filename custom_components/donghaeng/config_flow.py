@@ -24,6 +24,15 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional("pension_buy_weekday", default="목요일"): vol.In(
             ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
         ),
+        vol.Optional("lotto_buy_time", default="06:30"): cv.string,
+        vol.Optional("lotto_buy_weekday", default="일요일"): vol.In(
+            ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+        ),
+        vol.Optional("lotto_game_1", default="자동"): cv.string,
+        vol.Optional("lotto_game_2", default="자동"): cv.string,
+        vol.Optional("lotto_game_3", default="자동"): cv.string,
+        vol.Optional("lotto_game_4", default="자동"): cv.string,
+        vol.Optional("lotto_game_5", default="자동"): cv.string,
         vol.Optional("discord_webhook_url", default=""): cv.string,
     }
 )
@@ -104,6 +113,13 @@ class DhLotteryOptionsFlowHandler(OptionsFlow):
         pension_buy_time = options.get("pension_buy_time", data.get("pension_buy_time", "17:00"))
         pension_buy_weekday = options.get("pension_buy_weekday", data.get("pension_buy_weekday", "목요일"))
         pension_manual_numbers = options.get("pension_manual_numbers", "810212,810410,120911,150402")
+        lotto_buy_time = options.get("lotto_buy_time", data.get("lotto_buy_time", "06:30"))
+        lotto_buy_weekday = options.get("lotto_buy_weekday", data.get("lotto_buy_weekday", "일요일"))
+        lotto_game_1 = options.get("lotto_game_1", data.get("lotto_game_1", "자동"))
+        lotto_game_2 = options.get("lotto_game_2", data.get("lotto_game_2", "자동"))
+        lotto_game_3 = options.get("lotto_game_3", data.get("lotto_game_3", "자동"))
+        lotto_game_4 = options.get("lotto_game_4", data.get("lotto_game_4", "자동"))
+        lotto_game_5 = options.get("lotto_game_5", data.get("lotto_game_5", "수동,2,4,9,10,11,12"))
 
         schema = vol.Schema(
             {
@@ -117,6 +133,15 @@ class DhLotteryOptionsFlowHandler(OptionsFlow):
                     ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
                 ),
                 vol.Optional("pension_manual_numbers", default=pension_manual_numbers): cv.string,
+                vol.Optional("lotto_buy_time", default=lotto_buy_time): cv.string,
+                vol.Optional("lotto_buy_weekday", default=lotto_buy_weekday): vol.In(
+                    ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+                ),
+                vol.Optional("lotto_game_1", default=lotto_game_1): cv.string,
+                vol.Optional("lotto_game_2", default=lotto_game_2): cv.string,
+                vol.Optional("lotto_game_3", default=lotto_game_3): cv.string,
+                vol.Optional("lotto_game_4", default=lotto_game_4): cv.string,
+                vol.Optional("lotto_game_5", default=lotto_game_5): cv.string,
             }
         )
 

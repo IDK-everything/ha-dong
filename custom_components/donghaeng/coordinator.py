@@ -119,6 +119,7 @@ class DhLotto645Coordinator(DhCoordinator):
         self,
         hass: HomeAssistant,
         client: DhLotteryClient,
+        entry: Any,
         lottery_refresh_func: Callable[[], Awaitable[None]],
     ):
         super().__init__(
@@ -128,11 +129,14 @@ class DhLotto645Coordinator(DhCoordinator):
             update_interval=COORDINATOR_UPDATE_INTERVAL,
         )
         self.client = client
+        self.entry = entry
         self.lotto_645 = DhLotto645(client)
         self.lottery_refresh_func = lottery_refresh_func
         self._latest_winning_numbers: Optional[DhLotto645.WinningData] = None
         self._buy_history_last_updated: Optional[datetime.datetime] = None
         self.winning_dict: dict[int, DhLotto645.WinningData] = {}
+        self._last_lotto_buy_attempt_time: Optional[datetime.datetime] = None
+        self._last_lotto_buy_attempt_weekday: Optional[int] = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Lotto 6/45 데이터를 비동기로 업데이트합니다."""
@@ -166,6 +170,87 @@ class DhLotto645Coordinator(DhCoordinator):
                         await self._async_get_buy_history_this_week()
                     )
                     self._buy_history_last_updated = now
+            else:
+                buy_history_this_week = self.data.get("buy_history_this_week", []) if self.data else []
+
+            # 로또 6/45 백그라운드 자동 구매 스케줄러
+            lotto_buy_time_str = self.entry.options.get("lotto_buy_time", self.entry.data.get("lotto_buy_time", "")) if self.entry else ""
+            lotto_buy_weekday_str = self.entry.options.get("lotto_buy_weekday", self.entry.data.get("lotto_buy_weekday", "")) if self.entry else ""
+
+            if lotto_buy_time_str and lotto_buy_weekday_str:
+                weekday_map = {"월요일": 0, "화요일": 1, "수요일": 2, "목요일": 3, "금요일": 4, "토요일": 5, "일요일": 6}
+                configured_weekday = weekday_map.get(lotto_buy_weekday_str, -1)
+
+                is_buy_time = False
+                if now.weekday() == configured_weekday:
+                    try:
+                        buy_hour, buy_minute = map(int, lotto_buy_time_str.split(":"))
+                        now_minutes = now.time().hour * 60 + now.time().minute
+                        cfg_minutes = buy_hour * 60 + buy_minute
+                        if 0 <= (now_minutes - cfg_minutes) < 5:
+                            is_buy_time = True
+                    except Exception as ex:
+                        _LOGGER.error(f"로또 구매 시간 파싱 실패 ({lotto_buy_time_str}): {ex}")
+
+                # 이미 이번 주에 구매한 내역이 있으면 건너뜨니다
+                target_lotto_round = None
+                if self._latest_winning_numbers:
+                    target_lotto_round = self._latest_winning_numbers.round_no + 1
+                already_bought = target_lotto_round is not None and any(
+                    h.round_no == target_lotto_round for h in buy_history_this_week
+                )
+
+                # 쿨다운: 이번 요일에 이미 시도한 경우 건너뜨니다
+                cooldown_active = (
+                    self._last_lotto_buy_attempt_weekday == now.weekday()
+                    and self._last_lotto_buy_attempt_time is not None
+                    and (now - self._last_lotto_buy_attempt_time) < datetime.timedelta(hours=3)
+                )
+
+                if is_buy_time and not already_bought and not cooldown_active:
+                    _LOGGER.info(f"설정된 로또 구매 시간 도달. 자동 구매를 시작합니다.")
+                    self._last_lotto_buy_attempt_time = now
+                    self._last_lotto_buy_attempt_weekday = now.weekday()
+                    try:
+                        from .client.dh_lotto_645 import DhLotto645SelMode
+                        items = []
+                        for i in range(1, 6):
+                            game_str = self.entry.options.get(f"lotto_game_{i}", self.entry.data.get(f"lotto_game_{i}", "")).strip()
+                            if not game_str:
+                                continue
+                            texts = [t.strip() for t in game_str.split(",")]
+                            sel_mode = DhLotto645SelMode(texts[0])
+                            if sel_mode == DhLotto645SelMode.AUTO:
+                                items.append(DhLotto645.Slot(DhLotto645SelMode.AUTO))
+                            else:
+                                items.append(DhLotto645.Slot(sel_mode, [int(t) for t in texts[1:]]))
+
+                        result = await self.lotto_645.async_buy(items)
+                        self._buy_history_last_updated = None  # 캐시 무효화
+                        await self.lottery_refresh_func()
+
+                        number_text = "\n".join(
+                            [f"- {game.slot} {game.mode} {' '.join(map(str, game.numbers))}" for game in result.games]
+                        )
+                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
+                        if webhook_url:
+                            remaining_balance = getattr(result, 'remaining_balance', 0)
+                            discord_msg = (
+                                f"📢 **[자동] 동행복권 로또 6/45 구매 완료**\n"
+                                f"- **회차**: 제 {result.round_no}회\n"
+                                f"- **구매일시**: {result.issue_dt}\n"
+                                f"- **바코드**: {result.barcode}\n"
+                                f"- **잔여 예치금**: {remaining_balance:,}원\n"
+                                f"- **구매 번호**:\n{number_text}"
+                            )
+                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+
+                    except Exception as ex:
+                        _LOGGER.error(f"백그라운드 로또 자동 구매 중 오류 발생: {ex}")
+                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
+                        if webhook_url:
+                            discord_msg = f"❌ **[자동] 동행복권 로또 6/45 구매 실패**\n- **사유**: {str(ex)}"
+                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
 
             return {
                 "latest_winning_numbers": latest_winning_numbers,

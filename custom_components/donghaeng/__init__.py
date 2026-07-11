@@ -87,7 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
 
     if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         data.lotto_645_coord = DhLotto645Coordinator(
-            hass, client, data.lottery_coord.async_clear_refresh
+            hass, client, entry, data.lottery_coord.async_clear_refresh
         )
         try:
             await data.lotto_645_coord.async_config_entry_first_refresh()
