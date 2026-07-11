@@ -432,11 +432,11 @@ class DhPension720Coordinator(DhCoordinator):
                 target_round = self._latest_round_no + 1
                 already_bought = any(history.round_no == target_round for history in buy_history_this_week)
                 
-                # Cooldown check: Do not retry if we attempted in the last 30 minutes for this target round
+                # Cooldown check: Do not retry if we attempted in the last 3 hours for this target round
                 cooldown_active = (
                     self._last_pension_buy_attempt_round == target_round
                     and self._last_pension_buy_attempt_time is not None
-                    and (now - self._last_pension_buy_attempt_time) < datetime.timedelta(minutes=30)
+                    and (now - self._last_pension_buy_attempt_time) < datetime.timedelta(hours=3)
                 )
 
                 # 새벽 0시~6시 등 판매정지 시간이 아닐 때만 구매
