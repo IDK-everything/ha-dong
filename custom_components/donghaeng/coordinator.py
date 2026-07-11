@@ -371,7 +371,8 @@ class DhPension720Coordinator(DhCoordinator):
                         if not candidates:
                             candidates = ["810212", "810410", "120911", "150402"]
 
-                        result = await self.pension_720.async_buy(candidates=candidates, allow_auto_fallback=True)
+                        # 수동 입력 번호만 구매 시도. 모두 실패해도 자동 번호로 폴백하지 않습니다.
+                        result = await self.pension_720.async_buy(candidates=candidates, allow_auto_fallback=False)
                         # 구매 후 내역 캐시를 즉시 무효화하여 already_bought가 다음 체크에서 정확히 반영되도록 합니다.
                         self._buy_history_last_updated = None
                         await self.lottery_refresh_func()
