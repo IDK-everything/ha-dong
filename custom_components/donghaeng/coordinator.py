@@ -69,25 +69,30 @@ class DhLotteryCoordinator(DhCoordinator):
             if self._check_update_balance(now):
                 async with async_timeout.timeout(10):
                     _LOGGER.info("예치금 정보를 업데이트합니다.")
-                    balance = await self.client.async_get_balance()
-                    self._balance_last_updated = now
+                    try:
+                        balance = await self.client.async_get_balance()
+                        self._balance_last_updated = now
+                    except Exception as balance_err:
+                        _LOGGER.error(f"예치금 조회 실패 (통합구성요소는 계속 실행됩니다): {balance_err}")
+                        # 이전 데이터가 있으면 유지, 없으면 기본값 사용
+                        balance = self.data.get("balance") if self.data else None
 
             accumulated_prize: Optional[int] = None
             if self._check_update_accumulated_prize(now):
                 async with async_timeout.timeout(10):
                     _LOGGER.info("누적 당첨금을 업데이트 합니다.")
-                    accumulated_prize = await self.client.async_get_accumulated_prize("LO40")
-                    self._accumulated_prize_last_updated = now
+                    try:
+                        accumulated_prize = await self.client.async_get_accumulated_prize("LO40")
+                        self._accumulated_prize_last_updated = now
+                    except Exception as prize_err:
+                        _LOGGER.warning(f"누적 당첨금 조회 실패 (무시됨): {prize_err}")
+                        accumulated_prize = self.data.get("accumulated_prize") if self.data else None
 
             return {
                 "balance": balance,
                 "accumulated_prize": accumulated_prize,
                 "update_dt": now.strftime("%Y-%m-%d %H:%M:%S"),
             }
-        # except DhLotteryLoginError as err:
-        # Raising ConfigEntryAuthFailed will cancel future updates
-        # and start a config flow with SOURCE_REAUTH (async_step_reauth)
-        # raise ConfigEntryAuthFailed from err
         except DhLotteryError as err:
             raise UpdateFailed(f"API와의 통신 오류: {err}")
 

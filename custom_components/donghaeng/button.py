@@ -29,9 +29,10 @@ async def async_setup_entry(
 
     refresh_button = DhLotteryRefreshButton(data.lottery_coord.client)
     entities: List[Entity] = [refresh_button]
-    if entry.options.get(CONF_LOTTO_645, entry.data[CONF_LOTTO_645]):
+    if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         entities.append(DHLotto645Buy1Button(hass, data.lotto_645_coord.client))
         entities.append(DHLotto645BuyAllButton(hass, data.lotto_645_coord.client))
+        entities.append(DHLotto645BuySettingsButton(hass, data.lotto_645_coord.client, entry))
     if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         entities.append(DHPension720BuyAutoButton(hass, data.pension_720_coord.client))
         entities.append(DHPension720BuyManualButton(hass, data.pension_720_coord.client))
@@ -123,6 +124,43 @@ class DHLotto645BuyAllButton(DhButton):
                 "game_4": "자동",
                 "game_5": "자동",
             },
+            blocking=True,
+            return_response=True,
+        )
+        if result["result"] == "fail":
+            raise DhLotto645Error(result["message"])
+
+
+class DHLotto645BuySettingsButton(DhButton):
+    """설정에 저장된 게임 구성으로 로또 645 구매 버튼."""
+
+    _attr_device_class = ButtonDeviceClass.IDENTIFY
+    _attr_name = "설정 번호로 구매"
+    _attr_icon = "mdi:cog-play"
+
+    def __init__(self, hass: HomeAssistant, client: DhLotteryClient, entry):
+        super().__init__(client, "lotto_645_buy_settings")
+        self.hass = hass
+        self._entry = entry
+        self._attr_device_info = get_dh_lotto_645_device_info(client.username)
+
+    async def async_press(self) -> None:
+        """설정에 저장된 lotto_game_1~5 값으로 구매합니다."""
+        options = self._entry.options
+        data = self._entry.data
+        service_data = {"entity_id": self.entity_id}
+        for i in range(1, 6):
+            game_val = options.get(f"lotto_game_{i}", data.get(f"lotto_game_{i}", "")).strip()
+            if game_val:
+                service_data[f"game_{i}"] = game_val
+
+        if len(service_data) <= 1:
+            raise DhLotto645Error("설정에 로또 게임이 지정되지 않았습니다. [통합구성요소 설정]에서 lotto_game_1~5를 입력해주세요.")
+
+        result = await self.hass.services.async_call(
+            DOMAIN,
+            BUY_LOTTO_645_SERVICE_NAME,
+            service_data,
             blocking=True,
             return_response=True,
         )
