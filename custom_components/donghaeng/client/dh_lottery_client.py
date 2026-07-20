@@ -160,15 +160,10 @@ class DhLotteryClient:
             current_time = int(datetime.datetime.now().timestamp() * 1000)
             user_result = await self.async_get_with_login("mypage/selectUserMndp.do", params={"_": current_time})
             
-            # API 응답 구조 진단용 로그 (구조 변경 감지)
-            _LOGGER.error(f"[예치금 API 응답 원본] type={type(user_result)}, keys={list(user_result.keys()) if isinstance(user_result, dict) else 'N/A'}, value={str(user_result)[:500]}")
-
             if isinstance(user_result, dict):
                  user_mndp = user_result.get("userMndp", user_result)
             else:
                  user_mndp = {}
-
-            _LOGGER.error(f"[userMndp 파싱 결과] type={type(user_mndp)}, keys={list(user_mndp.keys()) if isinstance(user_mndp, dict) else 'N/A'}, value={str(user_mndp)[:300]}")
 
             total_amt = int(user_mndp.get("totalAmt", 0))
             crnt_entrs_amt = int(user_mndp.get("crntEntrsAmt", 0))
