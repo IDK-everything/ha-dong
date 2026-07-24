@@ -192,7 +192,7 @@ class DhLotto645Coordinator(DhCoordinator):
                         buy_hour, buy_minute = map(int, lotto_buy_time_str.split(":"))
                         now_minutes = now.time().hour * 60 + now.time().minute
                         cfg_minutes = buy_hour * 60 + buy_minute
-                        if 0 <= (now_minutes - cfg_minutes) < 5:
+                        if 0 <= (now_minutes - cfg_minutes) < 10:
                             is_buy_time = True
                     except Exception as ex:
                         _LOGGER.error(f"로또 구매 시간 파싱 실패 ({lotto_buy_time_str}): {ex}")
@@ -428,7 +428,7 @@ class DhPension720Coordinator(DhCoordinator):
                     now_time = now.time()
                     now_minutes = now_time.hour * 60 + now_time.minute
                     cfg_minutes = configured_time.hour * 60 + configured_time.minute
-                    if 0 <= (now_minutes - cfg_minutes) < 5:
+                    if 0 <= (now_minutes - cfg_minutes) < 10:
                         is_buy_time = True
                 except Exception as ex:
                     _LOGGER.error(f"구매 시간 파싱 실패 (값: {buy_time_str}): {ex}")
