@@ -259,6 +259,7 @@ async def _async_setup_service(
             if webhook_url:
                 failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
                 success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
+                sold_out_candidates_str = ", ".join(result.sold_out_candidates) if getattr(result, 'sold_out_candidates', None) else "없음"
                 remaining_balance = getattr(result, 'remaining_balance', 0)
                 
                 discord_msg = (
@@ -268,6 +269,7 @@ async def _async_setup_service(
                     f"- **주문번호**: {result.order_no}\n"
                     f"- **성공번호**: {success_candidate_str}\n"
                     f"- **실패번호**: {failed_candidates_str}\n"
+                    f"- **매진으로 구매 안 함**: {sold_out_candidates_str}\n"
                     f"- **잔여 예치금**: {remaining_balance:,}원\n"
                     f"- **구매 번호**:\n{number_text}"
                 )

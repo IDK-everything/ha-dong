@@ -44,6 +44,7 @@ class DhPension720BuyData:
     games: List[DhPension720Game] = field(default_factory=list)
     failed_candidates: List[str] = field(default_factory=list)
     success_candidate: Optional[str] = None
+    sold_out_candidates: List[str] = field(default_factory=list)
     remaining_balance: int = 0
 
     def to_dict(self) -> Dict:
@@ -55,6 +56,7 @@ class DhPension720BuyData:
             "games": [game.__dict__ for game in self.games],
             "failed_candidates": self.failed_candidates,
             "success_candidate": self.success_candidate,
+            "sold_out_candidates": self.sold_out_candidates,
             "remaining_balance": self.remaining_balance,
         }
 
@@ -222,6 +224,82 @@ class DhPension720:
         except Exception as ex:
             raise DhPension720Error(f"주문 예약 결과 처리 실패 ({ex}): {decrypted_order[:200]}...")
 
+    async def _async_check_verify_no(
+        self, win720_round: str, num: str, key_code: str, headers: dict,
+        auto_sel_set: str = "SA", sel_class: str = ""
+    ) -> Optional[Dict]:
+        """checkVerifyNo.do를 호출하여 번호의 구매 가능 여부를 검증합니다.
+
+        auto_sel_set="SA"이면 1~5조 전체, "S"이면 sel_class(조) 단일로 검증합니다.
+        응답: resultCode=100 + verifyYn=Y + recommendYN=N 이면 구매 가능.
+        recommendYN=Y 이면 '이미 판매가 완료되었습니다'(매진)를 의미합니다.
+        """
+        buy_cnt = 5 if auto_sel_set == "SA" else 1
+        payload = (
+            f"ROUND={win720_round}&SEL_NO={num}&BUY_CNT={buy_cnt}"
+            f"&AUTO_SEL_SET={auto_sel_set}&SEL_CLASS={sel_class}"
+            f"&BUY_TYPE=M&ACCS_TYPE=02"
+        )
+        enc_payload = self._encText(payload, key_code)
+
+        try:
+            resp = await self.client.session.post(
+                url="https://el.dhlottery.co.kr/checkVerifyNo.do",
+                headers=headers,
+                data={"q": urllib.parse.quote(enc_payload, safe='')}
+            )
+            resp_text = await resp.text()
+            ret = json.loads(resp_text)
+            q_val = ret.get('q')
+            if not q_val:
+                raise DhPension720Error(f"checkVerifyNo 응답이 올바르지 않습니다: {resp_text[:100]}")
+            decrypted = self._decText(q_val, key_code)
+            return json.loads(decrypted)
+        except Exception as ex:
+            _LOGGER.warning(f"checkVerifyNo 검증 중 오류 발생 (번호 {num}, 조 {sel_class or '전체'}): {ex}")
+            return None
+
+    async def _async_check_all_groups_sold_out(
+        self, win720_round: str, num: str, key_code: str, headers: dict
+    ) -> List[str]:
+        """1~5조 중 판매 완료(매진)된 조 목록을 반환합니다.
+
+        반환값이 빈 리스트이면 모든 조가 구매 가능함을 의미합니다.
+        검증 자체가 실패한 경우(None 반환 등)는 조 단위 검증 결과로 대체하며,
+        개별 조 검증도 실패하면 해당 조는 매진이 아닌 '확인 불가'로 빈 리스트를 반환합니다.
+        """
+        # SA 모드로 전체 조를 한 번에 빠르게 확인 (추가 호출 최소화)
+        sa_result = await self._async_check_verify_no(
+            win720_round, num, key_code, headers, auto_sel_set="SA"
+        )
+        if sa_result is not None:
+            try:
+                if str(sa_result.get("resultCode")) == "100" and sa_result.get("verifyYn") == "Y" and sa_result.get("recommendYN") == "N":
+                    return []
+            except Exception as ex:
+                _LOGGER.warning(f"SA 검증 결과 파싱 실패 (번호 {num}): {ex}")
+
+        # 매진이거나 검증이 실패한 경우 조 단위로 확인해 매진 조를 식별합니다.
+        sold_out: List[str] = []
+        for i in range(1, 6):
+            result = await self._async_check_verify_no(
+                win720_round, num, key_code, headers, auto_sel_set="S", sel_class=str(i)
+            )
+            if result is None:
+                continue
+            try:
+                available = (
+                    str(result.get("resultCode")) == "100"
+                    and result.get("verifyYn") == "Y"
+                    and result.get("recommendYN") == "N"
+                )
+            except Exception as ex:
+                _LOGGER.warning(f"조 검증 결과 파싱 실패 (번호 {num}, {i}조): {ex}")
+                available = False
+            if not available:
+                sold_out.append(f"{i}조")
+        return sold_out
+
     async def async_buy(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
         """연금복권을 수동 후보군 모두 구매합니다. allow_auto_fallback=True이면 전체 실패 시 자동 번호로 구매합니다."""
         _LOGGER.info(f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'})")
@@ -262,6 +340,7 @@ class DhPension720:
         all_games = []
         failed_candidates = []
         success_candidates = []
+        sold_out_candidates = []
         issue_dt = None
 
         # 2. 수동 후보 번호들에 대해 가능한 한 모두 구매 시도
@@ -271,6 +350,17 @@ class DhPension720:
             if balance.purchase_available < 5000:
                 _LOGGER.info(f"예치금 부족으로 인해 남은 수동 번호 구매를 중단합니다. (잔액: {balance.purchase_available}원)")
                 break
+
+            # 2-1. 구매 전 1~5조 중 매진된 조가 있는지 사전 검증.
+            # 어느 한 조라도 매진이면 해당 번호는 구매하지 않고 다음 후보로 넘어갑니다.
+            sold_out_groups = await self._async_check_all_groups_sold_out(
+                win720_round, num, keyCode, headers
+            )
+            if sold_out_groups:
+                sold_out_desc = ", ".join(sold_out_groups)
+                _LOGGER.warning(f"수동 후보 번호 {num}의 {sold_out_desc}이(가) 매진되어 구매를 건너뜁니다.")
+                sold_out_candidates.append(f"{num} ({sold_out_desc} 매진)")
+                continue
 
             if purchased_orders or failed_candidates:
                 _LOGGER.info("이전 시도 후 세션 안정화를 위해 3초간 대기합니다.")
@@ -373,8 +463,20 @@ class DhPension720:
         # 3. 모든 수동 후보 번호 구매가 실패한 경우 처리
         if len(success_candidates) == 0 and not allow_auto_fallback:
             # 자동 폴백이 비허용(수동 전용 모드)인 경우: 바로 에러 반환
-            failed_str = ", ".join(failed_candidates)
-            raise DhPension720Error(f"수동 후보 번호({failed_str}) 구매에 모두 실패했습니다. (이미 구매된 번호이거나 판매 종료된 번호입니다.)")
+            reasons = []
+            if failed_candidates:
+                failed_str = ", ".join(failed_candidates)
+                reasons.append(f"후보 번호({failed_str}) 구매 실패")
+            if sold_out_candidates:
+                sold_out_str = ", ".join(sold_out_candidates)
+                reasons.append(f"매진으로 구매하지 않음 ({sold_out_str})")
+            if not reasons:
+                reasons.append("구매 가능한 후보가 없음")
+            raise DhPension720Error(
+                "수동 후보 번호 구매가 모두 진행되지 않았습니다. "
+                + "; ".join(reasons)
+                + ". (이미 구매된 번호이거나 판매 종료된 번호입니다.)"
+            )
 
         if len(success_candidates) == 0:
             if failed_candidates:
@@ -388,34 +490,53 @@ class DhPension720:
             _LOGGER.info("모든 수동 후보 번호 예약에 실패하여 자동 번호로 구매를 진행합니다.")
             payload = f"ROUND={win720_round}&round={win720_round}&LT_EPSD={last_episode}&AUTO_SEL_SET=SA&SEL_CLASS=&BUY_TYPE=A&ACCS_TYPE=01"
             enc_payload = self._encText(payload, keyCode)
-            
-            try:
-                resp = await self.client.session.post(
-                    url="https://el.dhlottery.co.kr/makeAutoNo.do",
-                    headers=headers,
-                    data={"q": urllib.parse.quote(enc_payload, safe='')}
+
+            extracted_num = ""
+            for auto_attempt in range(1, 4):
+                try:
+                    resp = await self.client.session.post(
+                        url="https://el.dhlottery.co.kr/makeAutoNo.do",
+                        headers=headers,
+                        data={"q": urllib.parse.quote(enc_payload, safe='')}
+                    )
+                    resp_text = await resp.text()
+                    make_auto_ret = json.loads(resp_text)
+                    q_val = make_auto_ret.get('q')
+                    if not q_val:
+                        raise DhPension720Error(f"makeAutoNo 응답이 올바르지 않습니다: {resp_text[:100]}")
+                except Exception as ex:
+                    raise DhPension720Error(f"번호 생성(makeAutoNo) 중 오류가 발생했습니다: {ex}")
+
+                decrypted = self._decText(q_val, keyCode)
+                if "resultMsg" in decrypted and ":" in decrypted:
+                     decrypted = re.sub(r'("resultMsg":\s*)([^",}]*)([,}])', r'\1"\2"\3', decrypted)
+
+                try:
+                    parsed_ret = json.loads(decrypted)
+                except Exception as ex:
+                    raise DhPension720Error(f"번호 생성 응답 복호화 실패: {decrypted[:200]}...")
+
+                extracted_num = parsed_ret.get("selLotNo", "")
+                if not extracted_num:
+                    result_msg = parsed_ret.get("resultMsg", "알 수 없는 오류")
+                    raise DhPension720Error(f"연금복권 번호 획득 실패 (사유: {result_msg})")
+
+                # 자동 생성 번호도 구매 전 1~5조 매진 여부를 검증합니다.
+                auto_sold_out = await self._async_check_all_groups_sold_out(
+                    win720_round, extracted_num, keyCode, headers
                 )
-                resp_text = await resp.text()
-                make_auto_ret = json.loads(resp_text)
-                q_val = make_auto_ret.get('q')
-                if not q_val:
-                    raise DhPension720Error(f"makeAutoNo 응답이 올바르지 않습니다: {resp_text[:100]}")
-            except Exception as ex:
-                raise DhPension720Error(f"번호 생성(makeAutoNo) 중 오류가 발생했습니다: {ex}")
+                if not auto_sold_out:
+                    break
 
-            decrypted = self._decText(q_val, keyCode)
-            if "resultMsg" in decrypted and ":" in decrypted:
-                 decrypted = re.sub(r'("resultMsg":\s*)([^",}]*)([,}])', r'\1"\2"\3', decrypted)
+                sold_out_desc = ", ".join(auto_sold_out)
+                _LOGGER.warning(
+                    f"자동 생성 번호 {extracted_num}의 {sold_out_desc}이(가) 매진되었습니다. "
+                    f"번호를 재생성합니다. ({auto_attempt}/3)"
+                )
+                extracted_num = ""
 
-            try:
-                parsed_ret = json.loads(decrypted)
-            except Exception as ex:
-                raise DhPension720Error(f"번호 생성 응답 복호화 실패: {decrypted[:200]}...")
-
-            extracted_num = parsed_ret.get("selLotNo", "")
             if not extracted_num:
-                result_msg = parsed_ret.get("resultMsg", "알 수 없는 오류")
-                raise DhPension720Error(f"연금복권 번호 획득 실패 (사유: {result_msg})")
+                raise DhPension720Error("자동 번호 생성이 매진으로 인해 3회 모두 실패했습니다. 잠시 후 다시 시도해 주세요.")
 
             _LOGGER.info(f"자동 생성 번호 {extracted_num} 예약 시도 중...")
             try:
@@ -503,6 +624,7 @@ class DhPension720:
             games=all_games,
             failed_candidates=failed_candidates,
             success_candidate=",".join(success_candidates) if success_candidates else None,
+            sold_out_candidates=sold_out_candidates,
             remaining_balance=remaining_balance
         )
 

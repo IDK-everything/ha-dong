@@ -10,6 +10,6 @@
   "requirements": ["pycryptodome"],
   "ssdp": [],
   "zeroconf": [],
-  "version": "0.2.0",
+  "version": "0.2.1",
   "issue_tracker": "https://github.com/IDK-everything/ha-dong/issues"
 }
