@@ -302,6 +302,11 @@ class DhPension720:
 
     async def async_buy(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
         """연금복권을 수동 후보군 모두 구매합니다. allow_auto_fallback=True이면 전체 실패 시 자동 번호로 구매합니다."""
+        async with self.client.purchase_lock:
+            return await self._async_buy_locked(candidates=candidates, allow_auto_fallback=allow_auto_fallback)
+
+    async def _async_buy_locked(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
+        """연금복권 구매 실행 (purchase_lock 획득 후 실행)."""
         _LOGGER.info(f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'})")
         
         now = datetime.datetime.now()

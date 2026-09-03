@@ -10,6 +10,13 @@
           "pension_720": "Pension Lottery 720+",
           "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
           "pension_buy_weekday": "Pension Lottery Auto Buy Weekday",
+          "lotto_buy_time": "Lotto 6/45 Auto Buy Time (HH:MM)",
+          "lotto_buy_weekday": "Lotto 6/45 Auto Buy Weekday",
+          "lotto_game_1": "Lotto Game 1",
+          "lotto_game_2": "Lotto Game 2",
+          "lotto_game_3": "Lotto Game 3",
+          "lotto_game_4": "Lotto Game 4",
+          "lotto_game_5": "Lotto Game 5",
           "discord_webhook_url": "Discord Webhook URL"
         }
       }
@@ -34,7 +41,14 @@
           "discord_webhook_url": "Discord Webhook URL",
           "pension_buy_time": "Pension Lottery Auto Buy Time (HH:MM)",
           "pension_buy_weekday": "Pension Lottery Auto Buy Weekday",
-          "pension_manual_numbers": "Pension manual candidate numbers (comma separated)"
+          "pension_manual_numbers": "Pension manual candidate numbers (comma separated)",
+          "lotto_buy_time": "Lotto 6/45 Auto Buy Time (HH:MM)",
+          "lotto_buy_weekday": "Lotto 6/45 Auto Buy Weekday",
+          "lotto_game_1": "Lotto Game 1",
+          "lotto_game_2": "Lotto Game 2",
+          "lotto_game_3": "Lotto Game 3",
+          "lotto_game_4": "Lotto Game 4",
+          "lotto_game_5": "Lotto Game 5"
         }
       }
     }

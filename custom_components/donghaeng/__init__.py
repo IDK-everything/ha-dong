@@ -77,7 +77,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
     except DhLotteryError as ex:
         raise ConfigEntryNotReady(f"동행 복권 로그인 실패: {ex}") from ex
 
-    data = DhLotteryData(DhLotteryCoordinator(hass, client), entry=entry)
+    data = DhLotteryData(DhLotteryCoordinator(hass, client, entry), entry=entry)
 
     # 센서 플랫폼 설정 전에 coordinator 첫 새로고침 수행
     try:
@@ -115,7 +115,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
 
 async def async_unload_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) -> bool:
     """설정 항목을 언로드합니다."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        data: DhLotteryData | None = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        if data and data.lottery_coord and data.lottery_coord.client:
+            try:
+                await data.lottery_coord.client.session.close()
+            except Exception as ex:
+                _LOGGER.warning(f"동행복권 세션 종료 중 오류: {ex}")
+    return unload_ok
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

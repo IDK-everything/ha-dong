@@ -1,6 +1,6 @@
+import asyncio
 import datetime
 import logging
-import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -63,7 +63,7 @@ class DhLotteryClient:
             },
         )
         self._rsa_key = RSAKey()
-        self.lock = threading.RLock()
+        self.purchase_lock = asyncio.Lock()
         self.logged_in = False
 
     @staticmethod
@@ -101,21 +101,20 @@ class DhLotteryClient:
         retry: int = 1,
     ) -> dict[str, Any]:
         """로그인이 필요한 페이지를 가져옵니다."""
-        with self.lock:
-            try:
-                return await self.async_get(path, params)
-            except DhAPIError:
-                if retry > 0:
-                    _LOGGER.info("세션 만료 감지됨. 재로그인을 시도합니다.")
-                    await self.async_login()
-                    return await self.async_get_with_login(path, params, retry - 1)
-                raise DhLotteryLoginError("❗로그인 또는 API 요청에 실패했습니다.")
-            except DhLotteryError:
-                raise
-            except Exception as ex:
-                raise DhLotteryError(
-                    "❗로그인이 필요한 페이지를 가져오지 못했습니다."
-                ) from ex
+        try:
+            return await self.async_get(path, params)
+        except DhAPIError:
+            if retry > 0:
+                _LOGGER.info("세션 만료 감지됨. 재로그인을 시도합니다.")
+                await self.async_login()
+                return await self.async_get_with_login(path, params, retry - 1)
+            raise DhLotteryLoginError("❗로그인 또는 API 요청에 실패했습니다.")
+        except DhLotteryError:
+            raise
+        except Exception as ex:
+            raise DhLotteryError(
+                "❗로그인이 필요한 페이지를 가져오지 못했습니다."
+            ) from ex
 
     async def async_login(self):
         """로그인을 수행합니다."""

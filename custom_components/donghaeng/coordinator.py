@@ -5,6 +5,8 @@ from typing import Any, Optional, List, Callable, Awaitable
 
 import async_timeout
 
+from homeassistant.components import persistent_notification
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .client.dh_lottery_client import (
@@ -15,6 +17,8 @@ from .client.dh_lottery_client import (
 from .client.dh_lotto_645 import DhLotto645
 from .client.dh_pension_720 import DhPension720, DhPension720Game, DhPension720BuyHistoryData
 from .const import (
+    CONF_LOTTO_645,
+    CONF_PENSION_720,
     COORDINATOR_UPDATE_INTERVAL,
     LOTTO_645_UPDATE_INTERVAL,
     LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL,
@@ -45,7 +49,12 @@ class DhCoordinator(DataUpdateCoordinator):
 class DhLotteryCoordinator(DhCoordinator):
     """동행복권 데이터 업데이트 코디네이터입니다."""
 
-    def __init__(self, hass: HomeAssistant, client: DhLotteryClient):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: DhLotteryClient,
+        entry: Optional[ConfigEntry] = None,
+    ):
         super().__init__(
             hass,
             _LOGGER,
@@ -53,8 +62,10 @@ class DhLotteryCoordinator(DhCoordinator):
             update_interval=COORDINATOR_UPDATE_INTERVAL,
         )
         self.client = client
+        self.entry = entry
         self._balance_last_updated: Optional[datetime.datetime] = None
         self._accumulated_prize_last_updated: Optional[datetime.datetime] = None
+        self._last_balance_alert_date: Optional[datetime.date] = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """동행복권 데이터를 비동기로 업데이트합니다."""
@@ -76,6 +87,8 @@ class DhLotteryCoordinator(DhCoordinator):
                         _LOGGER.error(f"예치금 조회 실패 (통합구성요소는 계속 실행됩니다): {balance_err}")
                         # 이전 데이터가 있으면 유지, 없으면 기본값 사용
                         balance = self.data.get("balance") if self.data else None
+            else:
+                balance = self.data.get("balance") if self.data else None
 
             accumulated_prize: Optional[int] = None
             if self._check_update_accumulated_prize(now):
@@ -87,6 +100,11 @@ class DhLotteryCoordinator(DhCoordinator):
                     except Exception as prize_err:
                         _LOGGER.warning(f"누적 당첨금 조회 실패 (무시됨): {prize_err}")
                         accumulated_prize = self.data.get("accumulated_prize") if self.data else None
+            else:
+                accumulated_prize = self.data.get("accumulated_prize") if self.data else None
+
+            # 매주 목요일 오전 9시 예치금 사전 점검 및 알림
+            await self._async_check_thursday_balance_alert(now, balance)
 
             return {
                 "balance": balance,
@@ -95,6 +113,86 @@ class DhLotteryCoordinator(DhCoordinator):
             }
         except DhLotteryError as err:
             raise UpdateFailed(f"API와의 통신 오류: {err}")
+
+    async def _async_check_thursday_balance_alert(
+        self, now: datetime.datetime, balance: Optional[DhLotteryBalanceData]
+    ) -> None:
+        """매주 목요일 오전 9시에 이번 주 구매 필요 예치금을 사전 계산하고 알림을 보냅니다."""
+        # 목요일(weekday == 3), 오전 9시(09:00 ~ 09:59)이고, 오늘 아직 알림을 보내지 않은 경우
+        if now.weekday() != 3 or now.hour != 9 or self._last_balance_alert_date == now.date():
+            return
+
+        if balance is None:
+            try:
+                balance = await self.client.async_get_balance()
+            except Exception as ex:
+                _LOGGER.warning(f"목요일 예치금 점검 중 잔액 조회 실패: {ex}")
+                return
+
+        self._last_balance_alert_date = now.date()
+
+        entry_options = self.entry.options if self.entry else {}
+        entry_data = self.entry.data if self.entry else {}
+
+        lotto_enabled = entry_options.get(CONF_LOTTO_645, entry_data.get(CONF_LOTTO_645, False))
+        pension_enabled = entry_options.get(CONF_PENSION_720, entry_data.get(CONF_PENSION_720, False))
+
+        lotto_cost = 0
+        lotto_games_count = 0
+        if lotto_enabled:
+            for i in range(1, 6):
+                game_str = entry_options.get(f"lotto_game_{i}", entry_data.get(f"lotto_game_{i}", "")).strip()
+                if game_str:
+                    lotto_games_count += 1
+            if lotto_games_count == 0:
+                lotto_games_count = 5
+            lotto_cost = lotto_games_count * 1000
+
+        pension_cost = 5000 if pension_enabled else 0
+        total_cost = lotto_cost + pension_cost
+
+        if total_cost == 0:
+            return
+
+        current_balance = balance.purchase_available
+        is_shortage = current_balance < total_cost
+        shortage_amt = max(0, total_cost - current_balance)
+
+        details = []
+        if lotto_enabled:
+            details.append(f"로또 6/45 ({lotto_games_count}게임): {lotto_cost:,}원")
+        if pension_enabled:
+            details.append(f"연금복권 720+ (1세트): {pension_cost:,}원")
+        details_str = ", ".join(details)
+
+        if is_shortage:
+            status_icon = "⚠️"
+            status_title = "동행복권 예치금 부족 사전 안내"
+            status_desc = f"- **상태**: ⚠️ **{shortage_amt:,}원 부족 (충전 필요)**\n💡 목요일 저녁 정기 자동 구매 전 동행복권 사이트에서 예치금을 충전해 주세요."
+        else:
+            status_icon = "📢"
+            status_title = "동행복권 목요일 정기 예치금 점검"
+            status_desc = "- **상태**: ✅ **정상 (구매 가능)**\n✅ 이번 주 복권 구매를 위한 예치금이 충분합니다."
+
+        discord_msg = (
+            f"{status_icon} **{status_title}**\n"
+            f"- **점검일시**: {now.strftime('%Y-%m-%d %H:%M')}\n"
+            f"- **현재 구매 가능 예치금**: {current_balance:,}원\n"
+            f"- **이번 주 구매 필요 금액**: {total_cost:,}원 ({details_str})\n"
+            f"{status_desc}"
+        )
+
+        webhook_url = entry_options.get("discord_webhook_url", entry_data.get("discord_webhook_url")) if self.entry else None
+        if webhook_url:
+            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+
+        if is_shortage:
+            persistent_notification.async_create(
+                self.hass,
+                f"현재 구매 가능 예치금({current_balance:,}원)이 이번 주 복권 구매 필요 금액({total_cost:,}원)보다 {shortage_amt:,}원 부족합니다. 원활한 자동 구매를 위해 충전해 주세요.",
+                "동행복권 예치금 부족 알림",
+                "donghaeng_thursday_balance_shortage"
+            )
 
     async def async_clear_refresh(self):
         """데이터를 새로고침합니다."""
@@ -280,11 +378,15 @@ class DhLotto645Coordinator(DhCoordinator):
         """당첨 번호를 업데이트할지 확인합니다."""
         if not self._latest_winning_numbers:
             return True
-        # 현재 시각이 토요일 20:40 ~ 21:30 사이인지 확인합니다.
-        if now.weekday() == 5 and datetime.time(20, 40) <= now.time() <= datetime.time(
-            21, 30
-        ):
+        # 현재 시각이 토요일 20:40 이후인지 확인합니다.
+        if now.weekday() == 5 and now.time() >= datetime.time(20, 40):
             if now.strftime("%Y-%m-%d") != self._latest_winning_numbers.draw_date:
+                return True
+        # 토요일을 놓쳤더라도 최신 당첨 번호 날짜가 지난 주 토요일 이전이면 갱신
+        elif now.weekday() != 5:
+            days_since_saturday = (now.weekday() - 5) % 7
+            last_saturday = (now - datetime.timedelta(days=days_since_saturday)).strftime("%Y-%m-%d")
+            if self._latest_winning_numbers.draw_date < last_saturday:
                 return True
         return False
 
@@ -377,6 +479,7 @@ class DhPension720Coordinator(DhCoordinator):
         self.pension_720 = DhPension720(client)
         self.lottery_refresh_func = lottery_refresh_func
         self._latest_round_no: Optional[int] = None
+        self._round_no_last_updated: Optional[datetime.datetime] = None
         self._buy_history_last_updated: Optional[datetime.datetime] = None
         self._last_pension_buy_attempt_time: Optional[datetime.datetime] = None
         self._last_pension_buy_attempt_round: Optional[int] = None
@@ -396,6 +499,7 @@ class DhPension720Coordinator(DhCoordinator):
                     _LOGGER.info("연금복권 최신 회차 번호를 업데이트합니다.")
                     latest_round_no = await self.pension_720.async_get_latest_round_no()
                     self._latest_round_no = latest_round_no
+                    self._round_no_last_updated = now
                     if self._buy_history_last_updated:
                         await self.lottery_refresh_func()
                     self._buy_history_last_updated = None
@@ -514,16 +618,19 @@ class DhPension720Coordinator(DhCoordinator):
     async def async_clear_refresh(self):
         """데이터를 새로고침합니다."""
         self._latest_round_no = None
+        self._round_no_last_updated = None
         self._buy_history_last_updated = None
         await self.async_request_refresh()
 
     def _check_update_round_no(self, now: datetime.datetime) -> bool:
         """최신 회차를 업데이트할지 확인합니다."""
-        if not self._latest_round_no:
+        if not self._latest_round_no or not self._round_no_last_updated:
             return True
-        if now.weekday() == 3 and datetime.time(19, 0) <= now.time() <= datetime.time(20, 0):
-            return True
-        return False
+        # 목요일 19시 이후 추첨 완료 후에는 30분 간격으로 최신 회차 반영 확인
+        if now.weekday() == 3 and now.hour >= 19:
+            return (now - self._round_no_last_updated) >= datetime.timedelta(minutes=30)
+        # 평시에는 12시간마다 최신 회차 점검
+        return (now - self._round_no_last_updated) >= datetime.timedelta(hours=12)
 
     def _async_check_update_buy_history(self, now: datetime.datetime) -> bool:
         """구매 내역을 업데이트할지 확인합니다."""

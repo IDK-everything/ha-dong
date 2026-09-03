@@ -287,44 +287,45 @@ class DhLotto645:
                 ],
             )
 
-        try:
-            deduplicate_numbers(items)
-            buy_count = await _verify_and_get_buy_count(items)
-            buy_items = items[:buy_count]
-            live_round = str(await self.async_get_latest_round_no() + 1)
-            direct = (await get_user_ready_socket())
-            param = make_param(buy_items)
-            resp = await self.client.session.post(
-                url="https://ol.dhlottery.co.kr/olotto/game/execBuy.do",
-                data={
-                    "round": live_round,
-                    "direct": direct,
-                    "nBuyAmount": str(1000 * len(buy_items)),
-                    "param": param,
-                    "gameCnt": len(buy_items),
-                    "saleMdaDcd": "10",
-                },
-                timeout=10,
-            )
-            response = await resp.json()
-            if response["result"]["resultCode"] != "100":
-                raise DhLotto645Error(
-                    f"❗로또6/45 구매에 실패했습니다. (사유: {response['result']['resultMsg']})"
-                )
-            buy_result = parse_result(response["result"])
-            # 구매 완료 후 잔여 예치금 조회
+        async with self.client.purchase_lock:
             try:
-                final_balance = await self.client.async_get_balance()
-                buy_result.remaining_balance = final_balance.purchase_available
-            except Exception:
-                pass
-            return buy_result
-        except DhLotteryError:
-            raise
-        except Exception as ex:
-            raise DhLotto645Error(
-                f"❗로또6/45 구매에 실패했습니다. (사유: {str(ex)})"
-            ) from ex
+                deduplicate_numbers(items)
+                buy_count = await _verify_and_get_buy_count(items)
+                buy_items = items[:buy_count]
+                live_round = str(await self.async_get_latest_round_no() + 1)
+                direct = (await get_user_ready_socket())
+                param = make_param(buy_items)
+                resp = await self.client.session.post(
+                    url="https://ol.dhlottery.co.kr/olotto/game/execBuy.do",
+                    data={
+                        "round": live_round,
+                        "direct": direct,
+                        "nBuyAmount": str(1000 * len(buy_items)),
+                        "param": param,
+                        "gameCnt": len(buy_items),
+                        "saleMdaDcd": "10",
+                    },
+                    timeout=10,
+                )
+                response = await resp.json()
+                if response["result"]["resultCode"] != "100":
+                    raise DhLotto645Error(
+                        f"❗로또6/45 구매에 실패했습니다. (사유: {response['result']['resultMsg']})"
+                    )
+                buy_result = parse_result(response["result"])
+                # 구매 완료 후 잔여 예치금 조회
+                try:
+                    final_balance = await self.client.async_get_balance()
+                    buy_result.remaining_balance = final_balance.purchase_available
+                except Exception:
+                    pass
+                return buy_result
+            except DhLotteryError:
+                raise
+            except Exception as ex:
+                raise DhLotto645Error(
+                    f"❗로또6/45 구매에 실패했습니다. (사유: {str(ex)})"
+                ) from ex
 
     async def async_get_buy_history_this_week(self) -> list[BuyHistoryData]:
         """최근 1주일간의 구매 내역을 조회합니다."""

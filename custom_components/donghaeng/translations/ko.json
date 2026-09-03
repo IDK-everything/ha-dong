@@ -18,6 +18,13 @@
           "pension_720": "연금복권 720+",
           "pension_buy_time": "연금복권 자동 구매 시간 (예: 17:00)",
           "pension_buy_weekday": "연금복권 자동 구매 요일",
+          "lotto_buy_time": "로또 6/45 자동 구매 시간 (예: 06:30)",
+          "lotto_buy_weekday": "로또 6/45 자동 구매 요일",
+          "lotto_game_1": "로또 게임 1 (예: 자동 / 수동,1,2,3,4,5,6 / 반자동,7,8)",
+          "lotto_game_2": "로또 게임 2",
+          "lotto_game_3": "로또 게임 3",
+          "lotto_game_4": "로또 게임 4",
+          "lotto_game_5": "로또 게임 5",
           "discord_webhook_url": "디스코드 웹훅 URL (선택)"
         }
       }
@@ -85,7 +92,14 @@
           "discord_webhook_url": "디스코드 웹훅 URL (선택)",
           "pension_buy_time": "연금복권 자동 구매 시간 (예: 17:00)",
           "pension_buy_weekday": "연금복권 자동 구매 요일",
-          "pension_manual_numbers": "연금복권 수동 구매 후보 번호 (쉼표로 구분)"
+          "pension_manual_numbers": "연금복권 수동 구매 후보 번호 (쉼표로 구분)",
+          "lotto_buy_time": "로또 6/45 자동 구매 시간 (예: 06:30)",
+          "lotto_buy_weekday": "로또 6/45 자동 구매 요일",
+          "lotto_game_1": "로또 게임 1 (예: 자동 / 수동,1,2,3,4,5,6 / 반자동,7,8)",
+          "lotto_game_2": "로또 게임 2",
+          "lotto_game_3": "로또 게임 3",
+          "lotto_game_4": "로또 게임 4",
+          "lotto_game_5": "로또 게임 5"
         }
       }
     }
