@@ -698,7 +698,7 @@ class DhPension720:
                     )
                 )
                 
-                if len(items) >= 2:
+                if len(items) >= 10:
                     break
                     
             return items

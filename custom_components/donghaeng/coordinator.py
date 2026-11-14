@@ -8,6 +8,7 @@ import async_timeout
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .client.dh_lottery_client import (
     DhLotteryError,
@@ -20,6 +21,7 @@ from .const import (
     CONF_LOTTO_645,
     CONF_PENSION_720,
     COORDINATOR_UPDATE_INTERVAL,
+    DRAW_RESULT_CHECK_INTERVAL,
     LOTTO_645_UPDATE_INTERVAL,
     LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL,
     LOTTERY_BALANCE_UPDATE_INTERVAL,
@@ -240,6 +242,9 @@ class DhLotto645Coordinator(DhCoordinator):
         self.winning_dict: dict[int, DhLotto645.WinningData] = {}
         self._last_lotto_buy_attempt_time: Optional[datetime.datetime] = None
         self._last_lotto_buy_attempt_weekday: Optional[int] = None
+        entry_id = entry.entry_id if entry else "default"
+        self._notified_store = Store(hass, 1, f"donghaeng.{entry_id}_lotto_notified")
+        self._notified_keys: Optional[list[str]] = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Lotto 6/45 데이터를 비동기로 업데이트합니다."""
@@ -267,12 +272,13 @@ class DhLotto645Coordinator(DhCoordinator):
 
             buy_history_this_week: List[DhLotto645BuyData] = []
             if self._async_check_update_buy_history(now):
-                async with async_timeout.timeout(10):
+                async with async_timeout.timeout(15):
                     _LOGGER.info("이번 주의 구매 내역을 업데이트합니다.")
                     buy_history_this_week = (
                         await self._async_get_buy_history_this_week()
                     )
                     self._buy_history_last_updated = now
+                await self._async_process_result_notifications(buy_history_this_week)
             else:
                 buy_history_this_week = self.data.get("buy_history_this_week", []) if self.data else []
 
@@ -394,7 +400,16 @@ class DhLotto645Coordinator(DhCoordinator):
         """구매 내역을 업데이트할지 확인합니다."""
         if not self._buy_history_last_updated:
             return True
-        return (now - self._buy_history_last_updated) >= LOTTO_645_UPDATE_INTERVAL
+        is_draw_window = (
+            now.weekday() == 5
+            and datetime.time(20, 40) <= now.time() <= datetime.time(23, 0)
+        )
+        has_pending = any(
+            h.result == "미추첨" or h.rank == -1
+            for h in (self.data.get("buy_history_this_week", []) if self.data else [])
+        )
+        interval = DRAW_RESULT_CHECK_INTERVAL if (is_draw_window and has_pending) else LOTTO_645_UPDATE_INTERVAL
+        return (now - self._buy_history_last_updated) >= interval
 
     async def _async_get_buy_history_this_week(self) -> List[DhLotto645BuyData]:
         """이번 주의 구매 내역을 가져옵니다."""
@@ -445,8 +460,6 @@ class DhLotto645Coordinator(DhCoordinator):
                         result=item.result,
                     )
                 )
-                if len(items) >= 5:
-                    break
         return items
 
     async def _async_get_winning_numbers(self, round_no: int):
@@ -454,8 +467,119 @@ class DhLotto645Coordinator(DhCoordinator):
         winning_data = self.winning_dict.get(round_no)
         if not winning_data:
             winning_data = await self.lotto_645.async_get_round_info(round_no)
-            self.winning_dict[round_no] = winning_data
+            if (
+                winning_data
+                and winning_data.numbers
+                and all(n is not None for n in winning_data.numbers)
+            ):
+                self.winning_dict[round_no] = winning_data
         return winning_data
+
+    async def _async_process_result_notifications(
+        self, buy_history: List[DhLotto645BuyData]
+    ) -> None:
+        """추첨이 완료된 로또 6/45 티켓 결과를 디스코드로 알립니다."""
+        # 영구 저장소 로드 및 최초 도입 시 시딩 처리
+        is_bootstrap = False
+        store_updated = False
+        if self._notified_keys is None:
+            stored = await self._notified_store.async_load()
+            if stored is None:
+                is_bootstrap = True
+                self._notified_keys = []
+                store_updated = True
+            else:
+                self._notified_keys = list(stored.get("keys", []))
+
+        if not buy_history:
+            if store_updated:
+                await self._notified_store.async_save({"keys": self._notified_keys})
+            return
+
+        # 티켓(회차, 바코드) 단위로 그룹화
+        tickets: dict[tuple[int, str], list[DhLotto645BuyData]] = {}
+        for item in buy_history:
+            key_tuple = (item.round_no, item.barcode)
+            tickets.setdefault(key_tuple, []).append(item)
+
+        webhook_url = (
+            self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url"))
+            if self.entry
+            else None
+        )
+
+        for (round_no, barcode), games_data in tickets.items():
+            ticket_key = f"{round_no}_{barcode}"
+            if ticket_key in self._notified_keys:
+                continue
+
+            # 아직 미추첨 상태이면 건너뜀
+            if any(g.result == "미추첨" or g.rank == -1 for g in games_data):
+                continue
+
+            # API 반영 시차 방어: 당첨이라는데 당첨번호 미반영이거나 모두 0등으로 파싱된 경우 보류
+            if any("당첨" in g.result for g in games_data):
+                winning_data = self.winning_dict.get(round_no)
+                if (
+                    not winning_data
+                    or int(winning_data.round_no) != int(round_no)
+                    or not winning_data.numbers
+                    or any(n is None for n in winning_data.numbers)
+                ):
+                    _LOGGER.debug(f"로또 {round_no}회 당첨번호 미반영으로 알림 보류")
+                    continue
+                if all(g.rank == 0 for g in games_data):
+                    _LOGGER.debug(f"로또 {round_no}회 등수 반영 지연으로 알림 보류")
+                    continue
+
+            # 최초 도입(Bootstrap) 시에는 기존 완료 건을 알림 없이 기처리 시딩만 수행
+            if is_bootstrap:
+                self._notified_keys.append(ticket_key)
+                store_updated = True
+                continue
+
+            if webhook_url:
+                has_win = any(g.rank in (1, 2, 3, 4, 5) for g in games_data)
+                header = (
+                    f"🎉 **[로또 6/45] 제 {round_no}회 추첨 결과 (당첨!)**"
+                    if has_win
+                    else f"📋 **[로또 6/45] 제 {round_no}회 추첨 결과 (낙첨)**"
+                )
+
+                win_line = ""
+                try:
+                    winning_data = await self._async_get_winning_numbers(round_no)
+                    if winning_data and int(winning_data.round_no) == int(round_no):
+                        win_nums = ", ".join(map(str, winning_data.numbers))
+                        win_line = f"- **당첨번호**: `{win_nums}` + 보너스 `{winning_data.bonus_num}`\n"
+                except Exception:
+                    pass
+
+                game_lines = []
+                for g in games_data:
+                    nums_str = " ".join(map(str, g.game.numbers))
+                    if g.rank in (1, 2, 3, 4, 5):
+                        res_str = f"**{g.rank}등 당첨** 🎉"
+                    else:
+                        res_str = "낙첨"
+                    game_lines.append(f"  - {g.game.slot} ({g.game.mode}) `{nums_str}` → {res_str}")
+
+                discord_msg = (
+                    f"{header}\n"
+                    f"{win_line}"
+                    f"- **바코드**: {barcode}\n"
+                    f"- **구매 내역**:\n" + "\n".join(game_lines)
+                )
+                if len(discord_msg) > 1900:
+                    discord_msg = discord_msg[:1897] + "..."
+                self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+
+            self._notified_keys.append(ticket_key)
+            store_updated = True
+
+        if store_updated:
+            self._notified_keys = self._notified_keys[-100:]
+            await self._notified_store.async_save({"keys": self._notified_keys})
 
 
 class DhPension720Coordinator(DhCoordinator):
@@ -483,6 +607,9 @@ class DhPension720Coordinator(DhCoordinator):
         self._buy_history_last_updated: Optional[datetime.datetime] = None
         self._last_pension_buy_attempt_time: Optional[datetime.datetime] = None
         self._last_pension_buy_attempt_round: Optional[int] = None
+        entry_id = entry.entry_id if entry else "default"
+        self._notified_store = Store(hass, 1, f"donghaeng.{entry_id}_pension_notified")
+        self._notified_keys: Optional[list[str]] = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """연금복권 720+ 데이터를 비동기로 업데이트합니다."""
@@ -507,12 +634,13 @@ class DhPension720Coordinator(DhCoordinator):
             # 2. 이번 주 구매 내역 갱신
             buy_history_this_week: List[DhPension720BuyHistoryData] = []
             if self._async_check_update_buy_history(now) or self.data is None:
-                async with async_timeout.timeout(10):
+                async with async_timeout.timeout(15):
                     _LOGGER.info("이번 주의 연금복권 구매 내역을 업데이트합니다.")
                     buy_history_this_week = (
                         await self.pension_720.async_get_buy_history_this_week()
                     )
                     self._buy_history_last_updated = now
+                await self._async_process_result_notifications(buy_history_this_week)
             else:
                 buy_history_this_week = self.data.get("buy_history_this_week", [])
 
@@ -636,5 +764,97 @@ class DhPension720Coordinator(DhCoordinator):
         """구매 내역을 업데이트할지 확인합니다."""
         if not self._buy_history_last_updated:
             return True
-        return (now - self._buy_history_last_updated) >= PENSION_720_UPDATE_INTERVAL
+        is_draw_window = (
+            now.weekday() == 3
+            and datetime.time(19, 15) <= now.time() <= datetime.time(21, 0)
+        )
+        has_pending = any(
+            h.result == "미추첨" or any(g.rank == -1 for g in h.games)
+            for h in (self.data.get("buy_history_this_week", []) if self.data else [])
+        )
+        interval = DRAW_RESULT_CHECK_INTERVAL if (is_draw_window and has_pending) else PENSION_720_UPDATE_INTERVAL
+        return (now - self._buy_history_last_updated) >= interval
+
+    async def _async_process_result_notifications(
+        self, buy_history: List[DhPension720BuyHistoryData]
+    ) -> None:
+        """추첨이 완료된 연금복권 720+ 티켓 결과를 디스코드로 알립니다."""
+        # 영구 저장소 로드 및 최초 도입 시 시딩 처리
+        is_bootstrap = False
+        store_updated = False
+        if self._notified_keys is None:
+            stored = await self._notified_store.async_load()
+            if stored is None:
+                is_bootstrap = True
+                self._notified_keys = []
+                store_updated = True
+            else:
+                self._notified_keys = list(stored.get("keys", []))
+
+        if not buy_history:
+            if store_updated:
+                await self._notified_store.async_save({"keys": self._notified_keys})
+            return
+
+        webhook_url = (
+            self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url"))
+            if self.entry
+            else None
+        )
+
+        for ticket in buy_history:
+            ticket_key = f"{ticket.round_no}_{ticket.order_no}"
+            if ticket_key in self._notified_keys:
+                continue
+
+            # 아직 미추첨 상태이거나 게임 목록이 비어있으면 건너뜀
+            if (
+                ticket.result == "미추첨"
+                or not ticket.games
+                or any(g.rank == -1 or g.status == "미추첨" for g in ticket.games)
+            ):
+                continue
+
+            # API 반영 시차 방어: 당첨인데 모든 게임의 rank가 0으로 파싱되면 상세 정보 반영 지연으로 보고 보류
+            if "당첨" in ticket.result and all(g.rank == 0 for g in ticket.games):
+                _LOGGER.debug(f"연금복권 {ticket.round_no}회 상세 당첨 등수 반영 지연으로 알림 보류")
+                continue
+
+            # 최초 도입(Bootstrap) 시에는 기존 완료 건을 알림 없이 기처리 시딩만 수행
+            if is_bootstrap:
+                self._notified_keys.append(ticket_key)
+                store_updated = True
+                continue
+
+            if webhook_url:
+                has_win = any(g.rank > 0 for g in ticket.games)
+                header = (
+                    f"🎉 **[연금복권 720+] 제 {ticket.round_no}회 추첨 결과 (당첨!)**"
+                    if has_win
+                    else f"📋 **[연금복권 720+] 제 {ticket.round_no}회 추첨 결과 (낙첨)**"
+                )
+
+                game_lines = []
+                for g in ticket.games:
+                    if g.rank > 0:
+                        res_str = f"**{g.status}** 🎉"
+                    else:
+                        res_str = g.status
+                    game_lines.append(f"  - {g.group} `{g.numbers}` → {res_str}")
+
+                discord_msg = (
+                    f"{header}\n"
+                    f"- **주문번호**: {ticket.order_no}\n"
+                    f"- **구매 내역**:\n" + "\n".join(game_lines)
+                )
+                if len(discord_msg) > 1900:
+                    discord_msg = discord_msg[:1897] + "..."
+                self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+
+            self._notified_keys.append(ticket_key)
+            store_updated = True
+
+        if store_updated:
+            self._notified_keys = self._notified_keys[-100:]
+            await self._notified_store.async_save({"keys": self._notified_keys})
 

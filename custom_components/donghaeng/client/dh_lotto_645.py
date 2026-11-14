@@ -352,6 +352,10 @@ class DhLotto645:
 
         try:
             results = await self.client.async_get_buy_list("LO40")
+            results.sort(
+                key=lambda x: (int(x.get("ltEpsd", 0) or 0), x.get("ntslOrdrNo", "") or ""),
+                reverse=True,
+            )
             items: List[DhLotto645.BuyHistoryData] = []
             for result in results:
                 order_no = result.get("ntslOrdrNo")
@@ -364,7 +368,7 @@ class DhLotto645:
                         games=await async_get_receipt(order_no, barcode),
                     )
                 )
-                if sum([len(item.games) for item in items]) >= 5:
+                if len(items) >= 10:
                     break
             return items
         except Exception as ex:

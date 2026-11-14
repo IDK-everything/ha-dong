@@ -29,6 +29,7 @@ LOTTERY_BALANCE_UPDATE_INTERVAL = timedelta(minutes=60)
 LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL = timedelta(minutes=60)
 LOTTO_645_UPDATE_INTERVAL = timedelta(minutes=60)
 PENSION_720_UPDATE_INTERVAL = timedelta(minutes=60)
+DRAW_RESULT_CHECK_INTERVAL = timedelta(minutes=15)
 
 
 def get_dh_lottery_device_info(username: str) -> DeviceInfo:

@@ -200,10 +200,10 @@ class DhLotteryClient:
             this_month_accumulated_purchase=wly_prchs_acml_amt,
         )
 
-    async def async_get_buy_list(self, lotto_id: str) -> list[dict[str, Any]]:
-        """1주일간의 구매내역을 조회합니다."""
+    async def async_get_buy_list(self, lotto_id: str, days: int = 14) -> list[dict[str, Any]]:
+        """최근 구매내역을 조회합니다. (기본 14일)"""
         end_date = datetime.datetime.now()
-        start_date = end_date - datetime.timedelta(days=7)
+        start_date = end_date - datetime.timedelta(days=days)
         try:
             result = await self.async_get_with_login(
                 "mypage/selectMyLotteryledger.do",
