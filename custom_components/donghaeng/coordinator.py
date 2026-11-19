@@ -31,6 +31,17 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _parse_buy_time(time_str: str) -> tuple[int, int]:
+    """'HH:MM' 또는 'HH:MM:SS' 형식의 시간 문자열을 (hour, minute) 튜플로 파싱합니다."""
+    parts = [part.strip() for part in str(time_str).strip().split(":")]
+    if len(parts) not in (2, 3):
+        raise ValueError(f"지원하지 않는 시간 형식입니다: {time_str}")
+    hour, minute = int(parts[0]), int(parts[1])
+    second = int(parts[2]) if len(parts) == 3 else 0
+    datetime.time(hour, minute, second)
+    return hour, minute
+
+
 @dataclass(order=True)
 class DhLotto645BuyData:
     """로또 구매 내역을 나타내는 데이터 클래스입니다."""
@@ -293,7 +304,7 @@ class DhLotto645Coordinator(DhCoordinator):
                 is_buy_time = False
                 if now.weekday() == configured_weekday:
                     try:
-                        buy_hour, buy_minute = map(int, lotto_buy_time_str.split(":"))
+                        buy_hour, buy_minute = _parse_buy_time(lotto_buy_time_str)
                         now_minutes = now.time().hour * 60 + now.time().minute
                         cfg_minutes = buy_hour * 60 + buy_minute
                         if 0 <= (now_minutes - cfg_minutes) < 10:
@@ -306,7 +317,7 @@ class DhLotto645Coordinator(DhCoordinator):
                 if self._latest_winning_numbers:
                     target_lotto_round = self._latest_winning_numbers.round_no + 1
                 already_bought = target_lotto_round is not None and any(
-                    h.round_no == target_lotto_round for h in buy_history_this_week
+                    int(h.round_no or 0) == int(target_lotto_round) for h in buy_history_this_week
                 )
 
                 # 쿨다운: 이번 요일에 이미 시도한 경우 건너뜨니다
@@ -654,7 +665,7 @@ class DhPension720Coordinator(DhCoordinator):
             is_buy_time = False
             if now.weekday() == configured_weekday:
                 try:
-                    buy_hour, buy_minute = map(int, buy_time_str.split(":"))
+                    buy_hour, buy_minute = _parse_buy_time(buy_time_str)
                     # 설정 시각부터 정확히 5분 이내에만 구매 시도 (이후 재시도 방지)
                     configured_time = datetime.time(buy_hour, buy_minute)
                     now_time = now.time()
@@ -667,7 +678,9 @@ class DhPension720Coordinator(DhCoordinator):
 
             if is_buy_time and self._latest_round_no is not None:
                 target_round = self._latest_round_no + 1
-                already_bought = any(history.round_no == target_round for history in buy_history_this_week)
+                already_bought = any(
+                    int(history.round_no or 0) == int(target_round) for history in buy_history_this_week
+                )
                 
                 # Cooldown check: Do not retry if we attempted in the last 3 hours for this target round
                 cooldown_active = (
