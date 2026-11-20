@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import logging
 from dataclasses import dataclass
@@ -7,7 +8,8 @@ import async_timeout
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .client.dh_lottery_client import (
@@ -30,16 +32,26 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+WEEKDAY_MAP = {
+    "월요일": 0,
+    "화요일": 1,
+    "수요일": 2,
+    "목요일": 3,
+    "금요일": 4,
+    "토요일": 5,
+    "일요일": 6,
+}
 
-def _parse_buy_time(time_str: str) -> tuple[int, int]:
-    """'HH:MM' 또는 'HH:MM:SS' 형식의 시간 문자열을 (hour, minute) 튜플로 파싱합니다."""
+
+def _parse_buy_time(time_str: str) -> tuple[int, int, int]:
+    """'HH:MM' 또는 'HH:MM:SS' 형식의 시간 문자열을 (hour, minute, second) 튜플로 파싱합니다."""
     parts = [part.strip() for part in str(time_str).strip().split(":")]
     if len(parts) not in (2, 3):
         raise ValueError(f"지원하지 않는 시간 형식입니다: {time_str}")
     hour, minute = int(parts[0]), int(parts[1])
     second = int(parts[2]) if len(parts) == 3 else 0
     datetime.time(hour, minute, second)
-    return hour, minute
+    return hour, minute, second
 
 
 @dataclass(order=True)
@@ -293,84 +305,8 @@ class DhLotto645Coordinator(DhCoordinator):
             else:
                 buy_history_this_week = self.data.get("buy_history_this_week", []) if self.data else []
 
-            # 로또 6/45 백그라운드 자동 구매 스케줄러
-            lotto_buy_time_str = self.entry.options.get("lotto_buy_time", self.entry.data.get("lotto_buy_time", "")) if self.entry else ""
-            lotto_buy_weekday_str = self.entry.options.get("lotto_buy_weekday", self.entry.data.get("lotto_buy_weekday", "")) if self.entry else ""
-
-            if lotto_buy_time_str and lotto_buy_weekday_str:
-                weekday_map = {"월요일": 0, "화요일": 1, "수요일": 2, "목요일": 3, "금요일": 4, "토요일": 5, "일요일": 6}
-                configured_weekday = weekday_map.get(lotto_buy_weekday_str, -1)
-
-                is_buy_time = False
-                if now.weekday() == configured_weekday:
-                    try:
-                        buy_hour, buy_minute = _parse_buy_time(lotto_buy_time_str)
-                        now_minutes = now.time().hour * 60 + now.time().minute
-                        cfg_minutes = buy_hour * 60 + buy_minute
-                        if 0 <= (now_minutes - cfg_minutes) < 10:
-                            is_buy_time = True
-                    except Exception as ex:
-                        _LOGGER.error(f"로또 구매 시간 파싱 실패 ({lotto_buy_time_str}): {ex}")
-
-                # 이미 이번 주에 구매한 내역이 있으면 건너뜨니다
-                target_lotto_round = None
-                if self._latest_winning_numbers:
-                    target_lotto_round = self._latest_winning_numbers.round_no + 1
-                already_bought = target_lotto_round is not None and any(
-                    int(h.round_no or 0) == int(target_lotto_round) for h in buy_history_this_week
-                )
-
-                # 쿨다운: 이번 요일에 이미 시도한 경우 건너뜨니다
-                cooldown_active = (
-                    self._last_lotto_buy_attempt_weekday == now.weekday()
-                    and self._last_lotto_buy_attempt_time is not None
-                    and (now - self._last_lotto_buy_attempt_time) < datetime.timedelta(hours=3)
-                )
-
-                if is_buy_time and not already_bought and not cooldown_active:
-                    _LOGGER.info(f"설정된 로또 구매 시간 도달. 자동 구매를 시작합니다.")
-                    self._last_lotto_buy_attempt_time = now
-                    self._last_lotto_buy_attempt_weekday = now.weekday()
-                    try:
-                        from .client.dh_lotto_645 import DhLotto645SelMode
-                        items = []
-                        for i in range(1, 6):
-                            game_str = self.entry.options.get(f"lotto_game_{i}", self.entry.data.get(f"lotto_game_{i}", "")).strip()
-                            if not game_str:
-                                continue
-                            texts = [t.strip() for t in game_str.split(",")]
-                            sel_mode = DhLotto645SelMode(texts[0])
-                            if sel_mode == DhLotto645SelMode.AUTO:
-                                items.append(DhLotto645.Slot(DhLotto645SelMode.AUTO))
-                            else:
-                                items.append(DhLotto645.Slot(sel_mode, [int(t) for t in texts[1:]]))
-
-                        result = await self.lotto_645.async_buy(items)
-                        self._buy_history_last_updated = None  # 캐시 무효화
-                        await self.lottery_refresh_func()
-
-                        number_text = "\n".join(
-                            [f"- {game.slot} {game.mode} {' '.join(map(str, game.numbers))}" for game in result.games]
-                        )
-                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
-                        if webhook_url:
-                            remaining_balance = getattr(result, 'remaining_balance', 0)
-                            discord_msg = (
-                                f"📢 **[자동] 동행복권 로또 6/45 구매 완료**\n"
-                                f"- **회차**: 제 {result.round_no}회\n"
-                                f"- **구매일시**: {result.issue_dt}\n"
-                                f"- **바코드**: {result.barcode}\n"
-                                f"- **잔여 예치금**: {remaining_balance:,}원\n"
-                                f"- **구매 번호**:\n{number_text}"
-                            )
-                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
-
-                    except Exception as ex:
-                        _LOGGER.error(f"백그라운드 로또 자동 구매 중 오류 발생: {ex}")
-                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
-                        if webhook_url:
-                            discord_msg = f"❌ **[자동] 동행복권 로또 6/45 구매 실패**\n- **사유**: {str(ex)}"
-                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+            # 로또 6/45 백그라운드 자동 구매 스케줄러 (정각 타이머 미발동/재시작 대비 폴백)
+            await self._async_try_auto_buy(now, buy_history_this_week, triggered_by_timer=False)
 
             return {
                 "latest_winning_numbers": latest_winning_numbers,
@@ -383,6 +319,182 @@ class DhLotto645Coordinator(DhCoordinator):
         # raise ConfigEntryAuthFailed from err
         except DhLotteryError as err:
             raise UpdateFailed(f"API와의 통신 오류: {err}") from err
+
+    def setup_buy_scheduler(self) -> Optional[CALLBACK_TYPE]:
+        """설정된 요일과 정확한 시각(초 단위 포함)에 로또 자동 구매 타이머를 등록합니다."""
+        if not self.entry:
+            return None
+        lotto_buy_time_str = self.entry.options.get(
+            "lotto_buy_time", self.entry.data.get("lotto_buy_time", "")
+        )
+        lotto_buy_weekday_str = self.entry.options.get(
+            "lotto_buy_weekday", self.entry.data.get("lotto_buy_weekday", "")
+        )
+        if not lotto_buy_time_str or not lotto_buy_weekday_str:
+            return None
+        configured_weekday = WEEKDAY_MAP.get(lotto_buy_weekday_str)
+        if configured_weekday is None:
+            _LOGGER.error(f"로또 구매 요일 설정이 올바르지 않습니다: {lotto_buy_weekday_str}")
+            return None
+        try:
+            buy_hour, buy_minute, buy_second = _parse_buy_time(lotto_buy_time_str)
+        except Exception as ex:
+            _LOGGER.error(f"로또 구매 시간 파싱 실패 ({lotto_buy_time_str}): {ex}")
+            return None
+
+        _LOGGER.info(
+            f"로또 6/45 자동 구매 스케줄러 등록: 매주 {lotto_buy_weekday_str} {buy_hour:02d}:{buy_minute:02d}:{buy_second:02d}"
+        )
+
+        @callback
+        def _handle_time_trigger(now_dt: datetime.datetime) -> None:
+            if now_dt.weekday() != configured_weekday:
+                return
+            self.hass.async_create_task(
+                self._async_run_scheduled_buy(buy_hour, buy_minute, buy_second)
+            )
+
+        return async_track_time_change(
+            self.hass,
+            _handle_time_trigger,
+            hour=buy_hour,
+            minute=buy_minute,
+            second=buy_second,
+        )
+
+    async def _async_run_scheduled_buy(
+        self, buy_hour: int, buy_minute: int, buy_second: int
+    ) -> None:
+        """정확한 예약 초에 로또 자동 구매를 실행합니다."""
+        now = datetime.datetime.now()
+        target_dt = now.replace(
+            hour=buy_hour, minute=buy_minute, second=buy_second, microsecond=0
+        )
+        wait_sec = (target_dt - now).total_seconds()
+        if 0 < wait_sec < 2:
+            await asyncio.sleep(wait_sec)
+        buy_history = self.data.get("buy_history_this_week", []) if self.data else []
+        bought = await self._async_try_auto_buy(
+            datetime.datetime.now(), buy_history, triggered_by_timer=True
+        )
+        if bought:
+            await self.async_request_refresh()
+
+    async def _async_try_auto_buy(
+        self,
+        now: datetime.datetime,
+        buy_history_this_week: List[DhLotto645BuyData],
+        triggered_by_timer: bool = False,
+    ) -> bool:
+        """로또 6/45 자동 구매 조건을 검증하고 구매를 시도합니다."""
+        if not self.entry:
+            return False
+
+        lotto_buy_time_str = self.entry.options.get(
+            "lotto_buy_time", self.entry.data.get("lotto_buy_time", "")
+        )
+        lotto_buy_weekday_str = self.entry.options.get(
+            "lotto_buy_weekday", self.entry.data.get("lotto_buy_weekday", "")
+        )
+        if not lotto_buy_time_str or not lotto_buy_weekday_str:
+            return False
+
+        configured_weekday = WEEKDAY_MAP.get(lotto_buy_weekday_str, -1)
+        if now.weekday() != configured_weekday:
+            return False
+
+        is_buy_time = triggered_by_timer
+        if not is_buy_time:
+            try:
+                buy_hour, buy_minute, buy_second = _parse_buy_time(lotto_buy_time_str)
+                now_seconds = now.hour * 3600 + now.minute * 60 + now.second
+                cfg_seconds = buy_hour * 3600 + buy_minute * 60 + buy_second
+                if 0 <= (now_seconds - cfg_seconds) < 600:
+                    is_buy_time = True
+            except Exception as ex:
+                _LOGGER.error(f"로또 구매 시간 파싱 실패 ({lotto_buy_time_str}): {ex}")
+                return False
+
+        if not is_buy_time:
+            return False
+
+        # 이미 이번 주에 구매한 내역이 있으면 건너뜁니다
+        target_lotto_round = None
+        if self._latest_winning_numbers:
+            target_lotto_round = self._latest_winning_numbers.round_no + 1
+        already_bought = target_lotto_round is not None and any(
+            int(h.round_no or 0) == int(target_lotto_round) for h in buy_history_this_week
+        )
+
+        # 쿨다운: 이번 요일에 이미 시도한 경우 건너뜁니다
+        cooldown_active = (
+            self._last_lotto_buy_attempt_weekday == now.weekday()
+            and self._last_lotto_buy_attempt_time is not None
+            and (now - self._last_lotto_buy_attempt_time) < datetime.timedelta(hours=3)
+        )
+
+        if already_bought or cooldown_active:
+            return False
+
+        _LOGGER.info("설정된 로또 구매 시간 도달. 자동 구매를 시작합니다.")
+        self._last_lotto_buy_attempt_time = now
+        self._last_lotto_buy_attempt_weekday = now.weekday()
+        try:
+            from .client.dh_lotto_645 import DhLotto645SelMode
+
+            items = []
+            for i in range(1, 6):
+                game_str = self.entry.options.get(
+                    f"lotto_game_{i}", self.entry.data.get(f"lotto_game_{i}", "")
+                ).strip()
+                if not game_str:
+                    continue
+                texts = [t.strip() for t in game_str.split(",")]
+                sel_mode = DhLotto645SelMode(texts[0])
+                if sel_mode == DhLotto645SelMode.AUTO:
+                    items.append(DhLotto645.Slot(DhLotto645SelMode.AUTO))
+                else:
+                    items.append(DhLotto645.Slot(sel_mode, [int(t) for t in texts[1:]]))
+
+            result = await self.lotto_645.async_buy(items)
+            self._buy_history_last_updated = None  # 캐시 무효화
+            await self.lottery_refresh_func()
+
+            number_text = "\n".join(
+                [
+                    f"- {game.slot} {game.mode} {' '.join(map(str, game.numbers))}"
+                    for game in result.games
+                ]
+            )
+            webhook_url = self.entry.options.get(
+                "discord_webhook_url", self.entry.data.get("discord_webhook_url")
+            )
+            if webhook_url:
+                remaining_balance = getattr(result, "remaining_balance", 0)
+                discord_msg = (
+                    f"📢 **[자동] 동행복권 로또 6/45 구매 완료**\n"
+                    f"- **회차**: 제 {result.round_no}회\n"
+                    f"- **구매일시**: {result.issue_dt}\n"
+                    f"- **바코드**: {result.barcode}\n"
+                    f"- **잔여 예치금**: {remaining_balance:,}원\n"
+                    f"- **구매 번호**:\n{number_text}"
+                )
+                self.hass.async_create_task(
+                    self.client.async_send_to_discord(webhook_url, discord_msg)
+                )
+            return True
+
+        except Exception as ex:
+            _LOGGER.error(f"백그라운드 로또 자동 구매 중 오류 발생: {ex}")
+            webhook_url = self.entry.options.get(
+                "discord_webhook_url", self.entry.data.get("discord_webhook_url")
+            )
+            if webhook_url:
+                discord_msg = f"❌ **[자동] 동행복권 로또 6/45 구매 실패**\n- **사유**: {str(ex)}"
+                self.hass.async_create_task(
+                    self.client.async_send_to_discord(webhook_url, discord_msg)
+                )
+            return False
 
     async def async_clear_refresh(self):
         """데이터를 새로고침합니다."""
@@ -655,98 +767,10 @@ class DhPension720Coordinator(DhCoordinator):
             else:
                 buy_history_this_week = self.data.get("buy_history_this_week", [])
 
-            # 3. 설정된 요일/시간에 따른 백그라운드 자동 구매 스케줄러 실행
-            buy_time_str = self.entry.options.get("pension_buy_time", self.entry.data.get("pension_buy_time", "17:00"))
-            buy_weekday_str = self.entry.options.get("pension_buy_weekday", self.entry.data.get("pension_buy_weekday", "목요일"))
-
-            weekday_map = {"월요일": 0, "화요일": 1, "수요일": 2, "목요일": 3, "금요일": 4, "토요일": 5, "일요일": 6}
-            configured_weekday = weekday_map.get(buy_weekday_str, 3)
-
-            is_buy_time = False
-            if now.weekday() == configured_weekday:
-                try:
-                    buy_hour, buy_minute = _parse_buy_time(buy_time_str)
-                    # 설정 시각부터 정확히 5분 이내에만 구매 시도 (이후 재시도 방지)
-                    configured_time = datetime.time(buy_hour, buy_minute)
-                    now_time = now.time()
-                    now_minutes = now_time.hour * 60 + now_time.minute
-                    cfg_minutes = configured_time.hour * 60 + configured_time.minute
-                    if 0 <= (now_minutes - cfg_minutes) < 10:
-                        is_buy_time = True
-                except Exception as ex:
-                    _LOGGER.error(f"구매 시간 파싱 실패 (값: {buy_time_str}): {ex}")
-
-            if is_buy_time and self._latest_round_no is not None:
-                target_round = self._latest_round_no + 1
-                already_bought = any(
-                    int(history.round_no or 0) == int(target_round) for history in buy_history_this_week
-                )
-                
-                # Cooldown check: Do not retry if we attempted in the last 3 hours for this target round
-                cooldown_active = (
-                    self._last_pension_buy_attempt_round == target_round
-                    and self._last_pension_buy_attempt_time is not None
-                    and (now - self._last_pension_buy_attempt_time) < datetime.timedelta(hours=3)
-                )
-
-                # 새벽 0시~6시 등 판매정지 시간이 아닐 때만 구매
-                is_valid_sales_time = True
-                if now.weekday() == 3 and 17 <= now.hour < 20: # 목요일 17~20시 판매 정지
-                    is_valid_sales_time = False
-                if 0 <= now.hour < 6: # 매일 0~6시 판매 정지
-                    is_valid_sales_time = False
-
-                if not already_bought and is_valid_sales_time and not cooldown_active:
-                    _LOGGER.info(f"설정된 자동 구매 시간 도달. 연금복권 {target_round}회 자동 구매를 진행합니다.")
-                    self._last_pension_buy_attempt_round = target_round
-                    self._last_pension_buy_attempt_time = now
-                    try:
-                        raw_nums = self.entry.options.get("pension_manual_numbers", self.entry.data.get("pension_manual_numbers", "810212,810410,120911,150402"))
-                        candidates = [x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]
-                        if not candidates:
-                            candidates = ["810212", "810410", "120911", "150402"]
-
-                        # 수동 입력 번호만 구매 시도. 모두 실패해도 자동 번호로 폴백하지 않습니다.
-                        result = await self.pension_720.async_buy(candidates=candidates, allow_auto_fallback=False)
-                        # 구매 후 내역 캐시를 즉시 무효화하여 already_bought가 다음 체크에서 정확히 반영되도록 합니다.
-                        self._buy_history_last_updated = None
-                        await self.lottery_refresh_func()
-                        buy_history_this_week = await self.pension_720.async_get_buy_history_this_week()
-                        
-                        # Discord Webhook Notification
-                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
-                        if webhook_url:
-                            number_text = "\n".join(
-                                [
-                                     f"- {game.group} {game.numbers} ({game.status})"
-                                     for game in result.games
-                                ]
-                            )
-                            failed_candidates_str = ", ".join(result.failed_candidates) if getattr(result, 'failed_candidates', None) else "없음"
-                            success_candidate_str = result.success_candidate if getattr(result, 'success_candidate', None) else "없음"
-                            sold_out_candidates_str = ", ".join(result.sold_out_candidates) if getattr(result, 'sold_out_candidates', None) else "없음"
-                            remaining_balance = getattr(result, 'remaining_balance', 0)
-                            
-                            discord_msg = (
-                                f"📢 **[자동] 동행복권 연금복권 720+ 구매 완료**\n"
-                                f"- **회차**: 제 {result.round_no}회\n"
-                                f"- **구매일시**: {result.issue_dt}\n"
-                                f"- **주문번호**: {result.order_no}\n"
-                                f"- **성공번호**: {success_candidate_str}\n"
-                                f"- **실패번호**: {failed_candidates_str}\n"
-                                f"- **매진으로 구매 안 함**: {sold_out_candidates_str}\n"
-                                f"- **잔여 예치금**: {remaining_balance:,}원\n"
-                                f"- **구매 번호**:\n{number_text}"
-                            )
-                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
-                    except Exception as ex:
-                        _LOGGER.error(f"백그라운드 연금복권 자동 구매 중 오류 발생: {ex}")
-                        
-                        # Discord Webhook Notification
-                        webhook_url = self.entry.options.get("discord_webhook_url", self.entry.data.get("discord_webhook_url")) if self.entry else None
-                        if webhook_url:
-                            discord_msg = f"❌ **[자동] 동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(ex)}"
-                            self.hass.async_create_task(self.client.async_send_to_discord(webhook_url, discord_msg))
+            # 3. 설정된 요일/시간에 따른 백그라운드 자동 구매 스케줄러 실행 (정각 타이머 미발동/재시작 대비 폴백)
+            buy_history_this_week, _ = await self._async_try_auto_buy(
+                now, buy_history_this_week, triggered_by_timer=False
+            )
 
             return {
                 "latest_round_no": self._latest_round_no,
@@ -755,6 +779,210 @@ class DhPension720Coordinator(DhCoordinator):
             }
         except DhLotteryError as err:
             raise UpdateFailed(f"API와의 통신 오류: {err}") from err
+
+    def setup_buy_scheduler(self) -> Optional[CALLBACK_TYPE]:
+        """설정된 요일과 정확한 시각(초 단위 포함)에 연금복권 자동 구매 타이머를 등록합니다."""
+        if not self.entry:
+            return None
+        buy_time_str = self.entry.options.get(
+            "pension_buy_time", self.entry.data.get("pension_buy_time", "17:00")
+        )
+        buy_weekday_str = self.entry.options.get(
+            "pension_buy_weekday", self.entry.data.get("pension_buy_weekday", "목요일")
+        )
+        if not buy_time_str or not buy_weekday_str:
+            return None
+        configured_weekday = WEEKDAY_MAP.get(buy_weekday_str)
+        if configured_weekday is None:
+            _LOGGER.error(f"연금복권 구매 요일 설정이 올바르지 않습니다: {buy_weekday_str}")
+            return None
+        try:
+            buy_hour, buy_minute, buy_second = _parse_buy_time(buy_time_str)
+        except Exception as ex:
+            _LOGGER.error(f"구매 시간 파싱 실패 (값: {buy_time_str}): {ex}")
+            return None
+
+        _LOGGER.info(
+            f"연금복권 720+ 자동 구매 스케줄러 등록: 매주 {buy_weekday_str} {buy_hour:02d}:{buy_minute:02d}:{buy_second:02d}"
+        )
+
+        @callback
+        def _handle_time_trigger(now_dt: datetime.datetime) -> None:
+            if now_dt.weekday() != configured_weekday:
+                return
+            self.hass.async_create_task(
+                self._async_run_scheduled_buy(buy_hour, buy_minute, buy_second)
+            )
+
+        return async_track_time_change(
+            self.hass,
+            _handle_time_trigger,
+            hour=buy_hour,
+            minute=buy_minute,
+            second=buy_second,
+        )
+
+    async def _async_run_scheduled_buy(
+        self, buy_hour: int, buy_minute: int, buy_second: int
+    ) -> None:
+        """정확한 예약 초에 연금복권 자동 구매를 실행합니다."""
+        now = datetime.datetime.now()
+        target_dt = now.replace(
+            hour=buy_hour, minute=buy_minute, second=buy_second, microsecond=0
+        )
+        wait_sec = (target_dt - now).total_seconds()
+        if 0 < wait_sec < 2:
+            await asyncio.sleep(wait_sec)
+        buy_history = self.data.get("buy_history_this_week", []) if self.data else []
+        _, bought = await self._async_try_auto_buy(
+            datetime.datetime.now(), buy_history, triggered_by_timer=True
+        )
+        if bought:
+            await self.async_request_refresh()
+
+    async def _async_try_auto_buy(
+        self,
+        now: datetime.datetime,
+        buy_history_this_week: List[DhPension720BuyHistoryData],
+        triggered_by_timer: bool = False,
+    ) -> tuple[List[DhPension720BuyHistoryData], bool]:
+        """연금복권 720+ 자동 구매 조건을 검증하고 구매를 시도합니다."""
+        if not self.entry:
+            return buy_history_this_week, False
+
+        buy_time_str = self.entry.options.get(
+            "pension_buy_time", self.entry.data.get("pension_buy_time", "17:00")
+        )
+        buy_weekday_str = self.entry.options.get(
+            "pension_buy_weekday", self.entry.data.get("pension_buy_weekday", "목요일")
+        )
+        configured_weekday = WEEKDAY_MAP.get(buy_weekday_str, 3)
+        if now.weekday() != configured_weekday:
+            return buy_history_this_week, False
+
+        is_buy_time = triggered_by_timer
+        if not is_buy_time:
+            try:
+                buy_hour, buy_minute, buy_second = _parse_buy_time(buy_time_str)
+                now_seconds = now.hour * 3600 + now.minute * 60 + now.second
+                cfg_seconds = buy_hour * 3600 + buy_minute * 60 + buy_second
+                if 0 <= (now_seconds - cfg_seconds) < 600:
+                    is_buy_time = True
+            except Exception as ex:
+                _LOGGER.error(f"구매 시간 파싱 실패 (값: {buy_time_str}): {ex}")
+                return buy_history_this_week, False
+
+        if not is_buy_time or self._latest_round_no is None:
+            return buy_history_this_week, False
+
+        target_round = self._latest_round_no + 1
+        already_bought = any(
+            int(history.round_no or 0) == int(target_round)
+            for history in buy_history_this_week
+        )
+
+        # Cooldown check: Do not retry if we attempted in the last 3 hours for this target round
+        cooldown_active = (
+            self._last_pension_buy_attempt_round == target_round
+            and self._last_pension_buy_attempt_time is not None
+            and (now - self._last_pension_buy_attempt_time) < datetime.timedelta(hours=3)
+        )
+
+        # 새벽 0시~6시 및 목요일 17~22시 판매정지 시간이 아닐 때만 구매
+        is_valid_sales_time = True
+        if now.weekday() == 3 and 17 <= now.hour < 22:  # 목요일 17~22시 판매 정지
+            is_valid_sales_time = False
+        if 0 <= now.hour < 6:  # 매일 0~6시 판매 정지
+            is_valid_sales_time = False
+
+        if already_bought or not is_valid_sales_time or cooldown_active:
+            return buy_history_this_week, False
+
+        _LOGGER.info(f"설정된 자동 구매 시간 도달. 연금복권 {target_round}회 자동 구매를 진행합니다.")
+        self._last_pension_buy_attempt_round = target_round
+        self._last_pension_buy_attempt_time = now
+        try:
+            raw_nums = self.entry.options.get(
+                "pension_manual_numbers",
+                self.entry.data.get(
+                    "pension_manual_numbers", "810212,810410,120911,150402"
+                ),
+            )
+            candidates = [
+                x.strip()
+                for x in raw_nums.split(",")
+                if x.strip().isdigit() and len(x.strip()) == 6
+            ]
+            if not candidates:
+                candidates = ["810212", "810410", "120911", "150402"]
+
+            # 수동 입력 번호만 구매 시도. 모두 실패해도 자동 번호로 폴백하지 않습니다.
+            result = await self.pension_720.async_buy(
+                candidates=candidates, allow_auto_fallback=False
+            )
+            # 구매 후 내역 캐시를 즉시 무효화하여 already_bought가 다음 체크에서 정확히 반영되도록 합니다.
+            self._buy_history_last_updated = None
+            await self.lottery_refresh_func()
+            buy_history_this_week = (
+                await self.pension_720.async_get_buy_history_this_week()
+            )
+
+            # Discord Webhook Notification
+            webhook_url = self.entry.options.get(
+                "discord_webhook_url", self.entry.data.get("discord_webhook_url")
+            )
+            if webhook_url:
+                number_text = "\n".join(
+                    [
+                        f"- {game.group} {game.numbers} ({game.status})"
+                        for game in result.games
+                    ]
+                )
+                failed_candidates_str = (
+                    ", ".join(result.failed_candidates)
+                    if getattr(result, "failed_candidates", None)
+                    else "없음"
+                )
+                success_candidate_str = (
+                    result.success_candidate
+                    if getattr(result, "success_candidate", None)
+                    else "없음"
+                )
+                sold_out_candidates_str = (
+                    ", ".join(result.sold_out_candidates)
+                    if getattr(result, "sold_out_candidates", None)
+                    else "없음"
+                )
+                remaining_balance = getattr(result, "remaining_balance", 0)
+
+                discord_msg = (
+                    f"📢 **[자동] 동행복권 연금복권 720+ 구매 완료**\n"
+                    f"- **회차**: 제 {result.round_no}회\n"
+                    f"- **구매일시**: {result.issue_dt}\n"
+                    f"- **주문번호**: {result.order_no}\n"
+                    f"- **성공번호**: {success_candidate_str}\n"
+                    f"- **실패번호**: {failed_candidates_str}\n"
+                    f"- **매진으로 구매 안 함**: {sold_out_candidates_str}\n"
+                    f"- **잔여 예치금**: {remaining_balance:,}원\n"
+                    f"- **구매 번호**:\n{number_text}"
+                )
+                self.hass.async_create_task(
+                    self.client.async_send_to_discord(webhook_url, discord_msg)
+                )
+            return buy_history_this_week, True
+        except Exception as ex:
+            _LOGGER.error(f"백그라운드 연금복권 자동 구매 중 오류 발생: {ex}")
+
+            # Discord Webhook Notification
+            webhook_url = self.entry.options.get(
+                "discord_webhook_url", self.entry.data.get("discord_webhook_url")
+            )
+            if webhook_url:
+                discord_msg = f"❌ **[자동] 동행복권 연금복권 720+ 구매 실패**\n- **사유**: {str(ex)}"
+                self.hass.async_create_task(
+                    self.client.async_send_to_discord(webhook_url, discord_msg)
+                )
+            return buy_history_this_week, False
 
     async def async_clear_refresh(self):
         """데이터를 새로고침합니다."""

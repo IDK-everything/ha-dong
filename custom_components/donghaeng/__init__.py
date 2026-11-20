@@ -93,6 +93,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
             await data.lotto_645_coord.async_config_entry_first_refresh()
         except Exception as ex:
             raise ConfigEntryNotReady(f"로또 정보 조회 실패: {ex}") from ex
+        if unsub := data.lotto_645_coord.setup_buy_scheduler():
+            entry.async_on_unload(unsub)
 
     if entry.options.get(CONF_PENSION_720, entry.data.get(CONF_PENSION_720, False)):
         data.pension_720_coord = DhPension720Coordinator(
@@ -102,6 +104,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
             await data.pension_720_coord.async_config_entry_first_refresh()
         except Exception as ex:
             raise ConfigEntryNotReady(f"연금복권 정보 조회 실패: {ex}") from ex
+        if unsub := data.pension_720_coord.setup_buy_scheduler():
+            entry.async_on_unload(unsub)
 
     entry.runtime_data = data
     hass.data[DOMAIN][entry.entry_id] = data

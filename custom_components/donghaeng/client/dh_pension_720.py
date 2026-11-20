@@ -310,8 +310,8 @@ class DhPension720:
         _LOGGER.info(f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'})")
         
         now = datetime.datetime.now()
-        if now.weekday() == 3 and 17 <= now.hour < 20:
-             raise DhPension720Error("❗목요일 오후 5시부터 8시까지는 판매 정지 시간입니다.")
+        if now.weekday() == 3 and 17 <= now.hour < 22:
+             raise DhPension720Error("❗목요일 오후 5시부터 10시까지는 판매 정지 시간입니다.")
         if 0 <= now.hour < 6:
              raise DhPension720Error("❗구매 가능 시간이 아닙니다. (매일 6시부터 24시까지 구매 가능)")
 
