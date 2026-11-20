@@ -300,14 +300,31 @@ class DhPension720:
                 sold_out.append(f"{i}조")
         return sold_out
 
-    async def async_buy(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
-        """연금복권을 수동 후보군 모두 구매합니다. allow_auto_fallback=True이면 전체 실패 시 자동 번호로 구매합니다."""
+    async def async_buy(
+        self,
+        candidates: Optional[List[str]] = None,
+        allow_auto_fallback: bool = True,
+        buy_all: bool = False,
+    ) -> DhPension720BuyData:
+        """연금복권 수동 후보군을 구매합니다. buy_all=True면 모든 후보를, False면 첫 성공 후보만 구매 후 중단합니다."""
         async with self.client.purchase_lock:
-            return await self._async_buy_locked(candidates=candidates, allow_auto_fallback=allow_auto_fallback)
+            return await self._async_buy_locked(
+                candidates=candidates,
+                allow_auto_fallback=allow_auto_fallback,
+                buy_all=buy_all,
+            )
 
-    async def _async_buy_locked(self, candidates: Optional[List[str]] = None, allow_auto_fallback: bool = True) -> DhPension720BuyData:
+    async def _async_buy_locked(
+        self,
+        candidates: Optional[List[str]] = None,
+        allow_auto_fallback: bool = True,
+        buy_all: bool = False,
+    ) -> DhPension720BuyData:
         """연금복권 구매 실행 (purchase_lock 획득 후 실행)."""
-        _LOGGER.info(f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'})")
+        _LOGGER.info(
+            f"연금복권 구매 시작 (자동 폴백: {'허용' if allow_auto_fallback else '비허용'}, "
+            f"후보 모두 구매: {'예' if buy_all else '아니오(첫 성공 시 중단)'})"
+        )
         
         now = datetime.datetime.now()
         if now.weekday() == 3 and 17 <= now.hour < 22:
@@ -453,6 +470,9 @@ class DhPension720:
                         )
                     )
                 _LOGGER.info(f"연금복권 수동 후보 번호 {num} 구매 완료! (주문번호: {orderNo})")
+                if not buy_all:
+                    _LOGGER.info(f"첫 번째 수동 후보 번호({num}) 구매에 성공하여 남은 후보 구매를 중단합니다.")
+                    break
 
             except Exception as ex:
                 failed_candidates.append(num)

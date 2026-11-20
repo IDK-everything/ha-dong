@@ -243,16 +243,22 @@ async def _async_setup_service(
             if mode == "auto":
                 candidates = []
                 allow_auto_fallback = True
+                buy_all = False
             else:
                 entry = lottery_data.entry
                 raw_nums = entry.options.get("pension_manual_numbers", entry.data.get("pension_manual_numbers", "810212,810410,120911,150402"))
-                candidates = [x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]
+                candidates = list(dict.fromkeys([x.strip() for x in raw_nums.split(",") if x.strip().isdigit() and len(x.strip()) == 6]))
                 if not candidates:
                     candidates = ["810212", "810410", "120911", "150402"]
                 # 수동 버튼에서는 자동 번호 폴백 없이 수동 번호만 구매합니다.
                 allow_auto_fallback = False
+                buy_all = bool(entry.options.get("pension_buy_all_candidates", entry.data.get("pension_buy_all_candidates", False)))
 
-            result = await lottery_data.pension_720_coord.pension_720.async_buy(candidates=candidates, allow_auto_fallback=allow_auto_fallback)
+            result = await lottery_data.pension_720_coord.pension_720.async_buy(
+                candidates=candidates,
+                allow_auto_fallback=allow_auto_fallback,
+                buy_all=buy_all,
+            )
             number_text = "\n".join(
                 [
                      f"- {game.group} {game.numbers} ({game.status})"

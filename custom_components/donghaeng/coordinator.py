@@ -173,7 +173,32 @@ class DhLotteryCoordinator(DhCoordinator):
                 lotto_games_count = 5
             lotto_cost = lotto_games_count * 1000
 
-        pension_cost = 5000 if pension_enabled else 0
+        pension_sets = 0
+        if pension_enabled:
+            pension_buy_all = bool(
+                entry_options.get(
+                    "pension_buy_all_candidates",
+                    entry_data.get("pension_buy_all_candidates", False),
+                )
+            )
+            if pension_buy_all:
+                raw_nums = entry_options.get(
+                    "pension_manual_numbers",
+                    entry_data.get("pension_manual_numbers", "810212,810410,120911,150402"),
+                )
+                valid_candidates = list(
+                    dict.fromkeys(
+                        [
+                            x.strip()
+                            for x in raw_nums.split(",")
+                            if x.strip().isdigit() and len(x.strip()) == 6
+                        ]
+                    )
+                )
+                pension_sets = max(1, len(valid_candidates))
+            else:
+                pension_sets = 1
+        pension_cost = 5000 * pension_sets
         total_cost = lotto_cost + pension_cost
 
         if total_cost == 0:
@@ -187,7 +212,7 @@ class DhLotteryCoordinator(DhCoordinator):
         if lotto_enabled:
             details.append(f"로또 6/45 ({lotto_games_count}게임): {lotto_cost:,}원")
         if pension_enabled:
-            details.append(f"연금복권 720+ (1세트): {pension_cost:,}원")
+            details.append(f"연금복권 720+ ({pension_sets}세트): {pension_cost:,}원")
         details_str = ", ".join(details)
 
         if is_shortage:
@@ -908,17 +933,28 @@ class DhPension720Coordinator(DhCoordinator):
                     "pension_manual_numbers", "810212,810410,120911,150402"
                 ),
             )
-            candidates = [
-                x.strip()
-                for x in raw_nums.split(",")
-                if x.strip().isdigit() and len(x.strip()) == 6
-            ]
+            candidates = list(
+                dict.fromkeys(
+                    [
+                        x.strip()
+                        for x in raw_nums.split(",")
+                        if x.strip().isdigit() and len(x.strip()) == 6
+                    ]
+                )
+            )
             if not candidates:
                 candidates = ["810212", "810410", "120911", "150402"]
 
+            buy_all = bool(
+                self.entry.options.get(
+                    "pension_buy_all_candidates",
+                    self.entry.data.get("pension_buy_all_candidates", False),
+                )
+            )
+
             # 수동 입력 번호만 구매 시도. 모두 실패해도 자동 번호로 폴백하지 않습니다.
             result = await self.pension_720.async_buy(
-                candidates=candidates, allow_auto_fallback=False
+                candidates=candidates, allow_auto_fallback=False, buy_all=buy_all
             )
             # 구매 후 내역 캐시를 즉시 무효화하여 already_bought가 다음 체크에서 정확히 반영되도록 합니다.
             self._buy_history_last_updated = None
