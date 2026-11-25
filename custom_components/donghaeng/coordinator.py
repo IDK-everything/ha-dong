@@ -24,6 +24,9 @@ from .const import (
     CONF_PENSION_720,
     COORDINATOR_UPDATE_INTERVAL,
     DRAW_RESULT_CHECK_INTERVAL,
+    EVENT_LOGIN_CHECK_FAILED,
+    LOGIN_CHECK_HOURS,
+    LOGIN_CHECK_WEEKDAYS,
     LOTTO_645_UPDATE_INTERVAL,
     LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL,
     LOTTERY_BALANCE_UPDATE_INTERVAL,
@@ -249,6 +252,106 @@ class DhLotteryCoordinator(DhCoordinator):
         self._balance_last_updated = None
         self._accumulated_prize_last_updated = None
         await self.async_request_refresh()
+
+    def setup_login_check_scheduler(self) -> Optional[CALLBACK_TYPE]:
+        """월·수·토 오전 9시/오후 9시 정기 로그인 및 서버 접속 확인 타이머를 등록합니다."""
+        unsubs: list[CALLBACK_TYPE] = []
+
+        @callback
+        def _handle_time_trigger(now_dt: datetime.datetime) -> None:
+            if now_dt.weekday() not in LOGIN_CHECK_WEEKDAYS:
+                return
+            self.hass.async_create_task(
+                self.async_check_login_status(notify_on_failure=True)
+            )
+
+        for check_hour in LOGIN_CHECK_HOURS:
+            unsubs.append(
+                async_track_time_change(
+                    self.hass,
+                    _handle_time_trigger,
+                    hour=check_hour,
+                    minute=0,
+                    second=0,
+                )
+            )
+
+        _LOGGER.info(
+            "동행복권 정기 로그인/서버 접속 확인 스케줄러 등록: 매주 월·수·토 %s시",
+            ", ".join(str(h) for h in LOGIN_CHECK_HOURS),
+        )
+
+        @callback
+        def _unsub_all() -> None:
+            for unsub in unsubs:
+                unsub()
+
+        return _unsub_all
+
+    async def async_check_login_status(
+        self, notify_on_failure: bool = True
+    ) -> dict[str, Any]:
+        """동행복권 서버 접속 및 로그인 상태를 확인하고, 실패 시 알림/이벤트를 발생시킵니다."""
+        checked_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        notification_id = f"donghaeng_login_check_failed_{self.client.username}"
+        try:
+            async with async_timeout.timeout(15):
+                await self.client.async_check_login()
+            _LOGGER.info(
+                "동행복권 정기 로그인/서버 접속 확인 성공 (%s)",
+                self.client.username,
+            )
+            persistent_notification.async_dismiss(self.hass, notification_id)
+            return {
+                "ok": True,
+                "username": self.client.username,
+                "checked_at": checked_at,
+            }
+        except Exception as err:
+            err_msg = str(err) or type(err).__name__
+            _LOGGER.warning(
+                "동행복권 정기 로그인/서버 접속 확인 실패 (%s): %s",
+                self.client.username,
+                err_msg,
+            )
+            if notify_on_failure:
+                entry_options = self.entry.options if self.entry else {}
+                entry_data = self.entry.data if self.entry else {}
+                webhook_url = entry_options.get(
+                    "discord_webhook_url", entry_data.get("discord_webhook_url")
+                )
+                if webhook_url:
+                    discord_msg = (
+                        f"⚠️ **동행복권 서버 접속/로그인 확인 실패**\n"
+                        f"- **계정**: {self.client.username}\n"
+                        f"- **확인시각**: {checked_at}\n"
+                        f"- **사유**: {err_msg}"
+                    )
+                    self.hass.async_create_task(
+                        self.client.async_send_to_discord(webhook_url, discord_msg)
+                    )
+
+                persistent_notification.async_create(
+                    self.hass,
+                    f"[{self.client.username}] 동행복권 서버 접속 또는 로그인 확인에 실패했습니다 ({checked_at}): {err_msg}",
+                    f"동행복권 접속/로그인 확인 실패 ({self.client.username})",
+                    notification_id,
+                )
+                self.hass.bus.async_fire(
+                    EVENT_LOGIN_CHECK_FAILED,
+                    {
+                        "username": self.client.username,
+                        "error": err_msg,
+                        "checked_at": checked_at,
+                    },
+                )
+
+            return {
+                "ok": False,
+                "username": self.client.username,
+                "error": err_msg,
+                "checked_at": checked_at,
+            }
 
     def _check_update_balance(self, now: datetime.datetime) -> bool:
         """예치금 정보를 업데이트할지 확인합니다."""

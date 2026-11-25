@@ -27,6 +27,7 @@ from .const import (
     CONF_PENSION_720,
     BUY_LOTTO_645_SERVICE_NAME,
     BUY_PENSION_720_SERVICE_NAME,
+    CHECK_LOGIN_SERVICE_NAME,
     REFRESH_LOTTERY_SERVICE_NAME,
 )
 from .coordinator import DhLotto645Coordinator, DhLotteryCoordinator, DhPension720Coordinator
@@ -84,6 +85,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhLotteryConfigEntry) ->
         await data.lottery_coord.async_config_entry_first_refresh()
     except Exception as ex:
         raise ConfigEntryNotReady(f"예치금 정보 조회 실패: {ex}") from ex
+
+    if unsub := data.lottery_coord.setup_login_check_scheduler():
+        entry.async_on_unload(unsub)
 
     if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):
         data.lotto_645_coord = DhLotto645Coordinator(
@@ -148,6 +152,18 @@ async def _async_setup_service(
                 await lottery_data.lotto_645_coord.async_clear_refresh()
             if lottery_data.pension_720_coord:
                 await lottery_data.pension_720_coord.async_clear_refresh()
+
+    async def _async_check_login(call: ServiceCall) -> ServiceResponse:
+        """동행복권 로그인 및 서버 접속 상태를 즉시 확인합니다."""
+        results = []
+        for lottery_data in hass.data.get(DOMAIN, {}).values():
+            if lottery_data and lottery_data.lottery_coord:
+                results.append(
+                    await lottery_data.lottery_coord.async_check_login_status(
+                        notify_on_failure=True
+                    )
+                )
+        return {"results": results}
 
     def _find_lottery_data(deposit_id: str) -> DhLotteryData:
         registry = er.async_get(hass)
@@ -327,6 +343,12 @@ async def _async_setup_service(
         DOMAIN,
         REFRESH_LOTTERY_SERVICE_NAME,
         _async_lottery_refresh,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        CHECK_LOGIN_SERVICE_NAME,
+        _async_check_login,
+        supports_response=SupportsResponse.OPTIONAL,
     )
     # options에 저장된 값을 우선 확인하고, 없으면 data에서 가져옵니다.
     if entry.options.get(CONF_LOTTO_645, entry.data.get(CONF_LOTTO_645, False)):

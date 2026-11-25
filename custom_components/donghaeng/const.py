@@ -7,8 +7,12 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 DOMAIN = "donghaeng"
 REFRESH_LOTTERY_SERVICE_NAME = "refresh_lottery"
+CHECK_LOGIN_SERVICE_NAME = "check_login"
 BUY_LOTTO_645_SERVICE_NAME = "buy_lotto_645"
 BUY_PENSION_720_SERVICE_NAME = "buy_pension_720"
+EVENT_LOGIN_CHECK_FAILED = "donghaeng_login_check_failed"
+LOGIN_CHECK_WEEKDAYS = (0, 2, 5)  # 월(0), 수(2), 토(5)
+LOGIN_CHECK_HOURS = (9, 21)       # 오전 9시, 오후 9시
 
 TITLE = "로또연금"
 TITLE_LOTTO = "로또 6/45"

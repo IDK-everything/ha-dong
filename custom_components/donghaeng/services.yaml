@@ -28,6 +28,8 @@ buy_lotto_645:
       selector:
         text:
 
+check_login: {}
+
 buy_pension_720:
   fields:
     entity_id:
