@@ -102,13 +102,13 @@ class DhLotteryClient:
         retry: int = 1,
     ) -> dict[str, Any]:
         """로그인이 필요한 페이지를 가져옵니다."""
+        request_started_at = datetime.datetime.now()
         try:
             return await self.async_get(path, params)
         except DhAPIError:
             if retry > 0:
                 _LOGGER.info("세션 만료 감지됨. 재로그인을 시도합니다.")
-                self.logged_in = False
-                await self.async_login()
+                await self.async_login(failed_at=request_started_at)
                 return await self.async_get_with_login(path, params, retry - 1)
             raise DhLotteryLoginError("❗로그인 또는 API 요청에 실패했습니다.")
         except DhLotteryError:
@@ -118,34 +118,37 @@ class DhLotteryClient:
                 "❗로그인이 필요한 페이지를 가져오지 못했습니다."
             ) from ex
 
-    async def async_login(self, force: bool = False):
+    async def async_login(
+        self,
+        force: bool = False,
+        failed_at: Optional[datetime.datetime] = None,
+    ):
         """로그인을 수행합니다."""
         async with self._login_lock:
             now = datetime.datetime.now()
-            if (
-                not force
-                and self.logged_in
-                and self._last_login_at is not None
-                and (now - self._last_login_at).total_seconds() < 5
-            ):
-                return
+            if not force and self.logged_in and self._last_login_at is not None:
+                if failed_at is not None and self._last_login_at >= failed_at:
+                    return
+                if failed_at is None and (now - self._last_login_at).total_seconds() < 5:
+                    return
 
             _LOGGER.info("로그인 시작")
             try:
                 rsa_key = await self._async_fetch_rsa_key()
                 # 로그인 POST 요청
-                resp = await self.session.post(
+                async with self.session.post(
                     url=f"{DH_LOTTERY_URL}/login/securityLoginCheck.do",
                     data={
                         "userId": rsa_key.encrypt(self.username),
                         "userPswdEncn": rsa_key.encrypt(self._password),
                         "inpUserId": self.username,
                     },
-                )
-                # 로그인 성공 여부 체크
-                if resp.status != 200:
-                    self.logged_in = False
-                    raise DhLotteryLoginError("로그인 요청 실패")
+                ) as resp:
+                    await resp.text()
+                    # 로그인 성공 여부 체크
+                    if resp.status != 200:
+                        self.logged_in = False
+                        raise DhLotteryLoginError("로그인 요청 실패")
 
                 self.logged_in = True
                 self._last_login_at = datetime.datetime.now()
@@ -157,12 +160,13 @@ class DhLotteryClient:
 
     async def _async_fetch_rsa_key(self) -> RSAKey:
         """RSA 공개키를 조회해 새 RSAKey 인스턴스를 반환합니다."""
-        resp = await self.session.get(
+        async with self.session.get(
             url=f"{DH_LOTTERY_URL}/login/selectRsaModulus.do",
-        )
-        if resp.status != 200:
-            raise DhLotteryLoginError(f"RSA 공개키 조회 실패 (HTTP {resp.status})")
-        result = await resp.json(content_type=None)
+        ) as resp:
+            if resp.status != 200:
+                await resp.text()
+                raise DhLotteryLoginError(f"RSA 공개키 조회 실패 (HTTP {resp.status})")
+            result = await resp.json(content_type=None)
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, dict) or not data.get("rsaModulus") or not data.get("publicExponent"):
             raise DhLotteryLoginError("RSA 공개키 응답이 올바르지 않습니다.")

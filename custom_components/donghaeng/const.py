@@ -11,7 +11,7 @@ CHECK_LOGIN_SERVICE_NAME = "check_login"
 BUY_LOTTO_645_SERVICE_NAME = "buy_lotto_645"
 BUY_PENSION_720_SERVICE_NAME = "buy_pension_720"
 EVENT_LOGIN_CHECK_FAILED = "donghaeng_login_check_failed"
-LOGIN_CHECK_WEEKDAYS = (0, 2, 5)  # 월(0), 수(2), 토(5)
+LOGIN_CHECK_WEEKDAYS = (1, 3, 5)  # 화(1), 목(3), 토(5)
 LOGIN_CHECK_HOURS = (9, 21)       # 오전 9시, 오후 9시
 
 TITLE = "로또연금"
@@ -29,10 +29,10 @@ CONF_PENSION_720 = "pension_720"
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
 COORDINATOR_UPDATE_INTERVAL = timedelta(minutes=3)
-LOTTERY_BALANCE_UPDATE_INTERVAL = timedelta(minutes=60)
-LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL = timedelta(minutes=60)
-LOTTO_645_UPDATE_INTERVAL = timedelta(minutes=60)
-PENSION_720_UPDATE_INTERVAL = timedelta(minutes=60)
+LOTTERY_BALANCE_UPDATE_INTERVAL = timedelta(hours=6)
+LOTTERY_ACCUMULATED_PRIZE_UPDATE_INTERVAL = timedelta(hours=12)
+LOTTO_645_UPDATE_INTERVAL = timedelta(hours=6)
+PENSION_720_UPDATE_INTERVAL = timedelta(hours=6)
 DRAW_RESULT_CHECK_INTERVAL = timedelta(minutes=15)
 
 

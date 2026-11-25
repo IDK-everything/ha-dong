@@ -254,7 +254,7 @@ class DhLotteryCoordinator(DhCoordinator):
         await self.async_request_refresh()
 
     def setup_login_check_scheduler(self) -> Optional[CALLBACK_TYPE]:
-        """월·수·토 오전 9시/오후 9시 정기 로그인 및 서버 접속 확인 타이머를 등록합니다."""
+        """화·목·토 오전 9시/오후 9시 정기 로그인 및 서버 접속 확인 타이머를 등록합니다."""
         unsubs: list[CALLBACK_TYPE] = []
 
         @callback
@@ -277,7 +277,7 @@ class DhLotteryCoordinator(DhCoordinator):
             )
 
         _LOGGER.info(
-            "동행복권 정기 로그인/서버 접속 확인 스케줄러 등록: 매주 월·수·토 %s시",
+            "동행복권 정기 로그인/서버 접속 확인 스케줄러 등록: 매주 화·목·토 %s시",
             ", ".join(str(h) for h in LOGIN_CHECK_HOURS),
         )
 
